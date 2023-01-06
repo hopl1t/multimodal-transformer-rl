@@ -33,7 +33,7 @@ class Config:
     game_doorpuzzle, \
     game_minecraft, \
     game_ale                        = range(3)       # Initialize game types as enum
-    GAME_CHOICE                     = game_doorpuzzle
+    GAME_CHOICE                     = game_minecraft
     USE_AUDIO                       = True           # Enable audio input
     TRAIN_MODELS                    = True           # Enable to train
     LOAD_EPISODE                    = 0              # If 0, the latest checkpoint is loaded

@@ -1,0 +1,126 @@
+Skeleton+
+(C) 2002,2003 Eric Ball
+
+1. STORY
+
+"You are in a maze of twisty passages, all alike" certainly 
+describes the situation you are in.  
+
+You hear faint footsteps, so you follow the sound through the 
+maze.  To your horror, you discover the source of the footsteps 
+is a Skeleton; and it doesn't look friendly.  Acting quickly, 
+you blast it with your Undead Disintegrator and the Skeleton 
+vanishes in a flash of colour.  But as you reload your UD, you 
+hear footsteps again; and you wonder; are you the hunter or the 
+hunted in this nightmare?
+
+2. GAMEPLAY
+
+NOTE: Skeleton is for one player only.
+The objective of Skeleton+ is to eliminate Skeletons without 
+being killed yourself.  Use your Joystick Controller to manuver 
+your way through the maze.  Press the red controller (fire) 
+button to shoot your Undead Disintegrator at a Skeleton.  When 
+a Skeleton is destroyed, another will take it's place.  Destroy 
+five Skeletons and you will enter the next maze.  Complete all 
+eight mazes to win your freedom.  Being touched or touching a
+Skeleton will reduce your life.  When your life reaches zero, the 
+game is over.
+
+Each new Skeleton is stronger than the previous and will require 
+more hits from your Undead Disintegrator to be destroyed.  You 
+are also not a dead shot with the Undead Disintegrator so 
+sometimes a Skeleton will require more shots to be destroyed.  
+Although each new Skeleton starts moving slowly, the speed with 
+which the Skeleton moves will gradually increase until it is 
+destroyed.
+
+You are also equipped with an Undead Locator which indicates the 
+direction of the Skeleton via a square at the edge of the screen. 
+The square will be near the top of the screen when the Skeleton 
+is ahead of you and near the bottom of the screen when the 
+Skeleton is behind you.
+
+Sound can provide assistance when playing Skeleton+.  The sound 
+of the Skeleton's footsteps will get louder the closer the 
+Skeleton is to you.  The sound will also be louder if the 
+Skeleton is in front of you and quieter if the Skeleton is 
+behind you.  If your ATARI Video Computer System is capable of 
+producing stereo then you will be able to hear if the Skeleton 
+is to the right or left of you as well.
+
+Two numbers are displayed at the bottom of the screen.  The 
+number of Skeletons you have destroyed is shown on the left.  The
+amount of life you have remaining is shown on the right.
+
+3. USING THE CONTROLLERS 
+
+Use your Joystick Controller with this Game Program. Be sure to 
+plug the controller cables firmly into the jacks at the back of 
+your ATARI Video Computer System. Hold the controller with the 
+red fire button to your upper left toward the television screen. 
+Use the LEFT CONTROLLER jack for this one-player game. See 
+Section 3 of your owner's manual for further details. 
+
+Use the Joystick Controller to: 
+
+- Move through the maze 
+- Shoot your Undead Disintegrator
+
+Push the Joystick forward to move forward, push the Joystick to 
+the right to turn right and push the joystick to the left to 
+turn left.  You must return the Joystick to the center before 
+each move.
+
+Press the red button to shoot your Undead Disintegrator.  You 
+must release the red button to shoot again.  It requires one 
+second to reload your Undead Disintegrator.
+
+4. CONSOLE CONTROLS 
+
+GAME SELECT SWITCH
+GAME RESET SWITCH
+Press down either the GAME SELECT or RESET switch to start the 
+game.  Pressing either the GAME SELECT or RESET switch during 
+the game has no effect.
+
+DIFFICULTY SWITCHES
+When the LEFT DIFFICULTY switch is set to A when the game is 
+started, you will need to destroy ten instead of five Skeletons 
+to complete each level.
+
+When the RIGHT DIFFICULTY switch is set to A when the game is 
+started, you will start with 49 life instead of 99 and your 
+Undead Disintegrator will only do half the damage it does when 
+the RIGHT DIFFICULTY switch is set to B.
+
+When the LEFT DIFFICULTY switch is set to A during the game your
+Undead Locator is turned off and you must use sound to find the
+Skeleton.  Stereo sound is recommended in this case.
+
+When the RIGHT DIFFICULTY switch is set to A during the game the
+speed of the Skeleton is reset only at the start of each level.
+
+TV TYPE SWITCH
+When the TV TYPE switch is set to B/W the Skeletons have the
+touch of death.  The game is over if you are touched by or touch 
+a Skeleton.
+
+5. LEGAL STUFF
+
+Permission is granted to distribute the ROM code for the ATARI 
+Video Computer System Game Program, Skeleton+, provided that this 
+text file is included with the code.  Skeleton+ may be included
+on websites and shareware or freeware compilations, but please 
+contact Eric Ball first. 
+
+The end user is granted permission to use the ROM code with an 
+emulator, or a RAM cartridge such as a Supercharger or Cuttle 
+Cart, or to make a single cartridge for use with their ATARI 
+Video Computer System.
+
+Permission is NOT granted for any individual to manufacture or 
+distribute cartridge versions of the ROM code for another end 
+user without the written consent of Eric Ball.
+
+Skeleton+ (C) 2002,2003 Eric Ball, all other rights reserved

@@ -1,8 +1,8 @@
 [tool.poetry]
-name = "multimodal-transformer-rl"
+name = "cleanrl"
 version = "1.0.0"
-description = "Reinforcement Learning over audio and video using transformers"
-authors = ["Nir Weingarten <nirzvi89@gmail.com>"]
+description = "High-quality single file implementation of Deep Reinforcement Learning algorithms with research-friendly features"
+authors = ["Costa Huang <costa.huang@outlook.com>"]
 include = ["cleanrl_utils"]
 keywords = ["reinforcement", "machine", "learning", "research"]
 license="MIT"
@@ -23,8 +23,8 @@ scipy = "1.7.3"
 python-speech-features = "^0.6"
 seaborn = "^0.12.2"
 minecraft = {path = "environments/Minecraft"}
-doorpuzzle = {path = "environments/Doorpuzzle"}
 librosa = "^0.9.2"
+doorpuzzle = {path = "environments/Doorpuzzle"}
 
 [tool.poetry.group.dev.dependencies]
 pre-commit = "^2.20.0"
@@ -99,6 +99,12 @@ optional = true
 [tool.poetry.group.cloud.dependencies]
 boto3 = "^1.24.70"
 awscli = "^1.25.71"
+
+[tool.poetry.group.isaacgym]
+optional = true
+[tool.poetry.group.isaacgym.dependencies]
+isaacgymenvs = {git = "https://github.com/vwxyzjn/IsaacGymEnvs.git", rev = "poetry"}
+isaacgym = {path = "cleanrl/ppo_continuous_action_isaacgym/isaacgym", develop = true}
 
 [tool.poetry.group.dm_control]
 optional = true

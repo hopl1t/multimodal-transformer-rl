@@ -30,6 +30,14 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 from Config import Config
+from enum import Enum
+
+class CASLAction(Enum):
+    NOP = 0
+    UP = 1
+    DOWN = 2
+    RIGHT = 3
+    LEFT = 4
 
 class Environment:
     def __init__(self):
@@ -104,6 +112,8 @@ class Environment:
         if self.frame_q.full():
             self.current_state = self._get_current_state()
 
+        return self._get_current_state()
+
     def step(self, action, pid=None, count=None):
         observation, reward, done = self.game.step(action, pid, count)
         self.total_reward += reward
@@ -121,7 +131,7 @@ class Environment:
         self.previous_state = self.current_state
         self.current_state = self._get_current_state()
 
-        return reward, done
+        return self._get_current_state(), reward, done, None
 
     def visualize_env(self, attention_i, attention_a):
         image, audio = self.game._get_obs(show_gt = True)

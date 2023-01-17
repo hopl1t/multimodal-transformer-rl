@@ -21,6 +21,7 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
     NoopResetEnv,
 )
 
+from Minecraft import Config
 from Minecraft import Minecraft
 
 def parse_args():
@@ -148,6 +149,8 @@ class Agent(nn.Module):
 
 if __name__ == "__main__":
     args = parse_args()
+    if Config.USE_AUDIO:
+        print('### 🔊 USING AUDIO 🔊 ###')
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     if args.track:
         import wandb

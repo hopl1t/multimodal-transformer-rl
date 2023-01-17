@@ -15,6 +15,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 # from src.environments.casl_environment import Environment as CASLEnv
 # from environments.Minecraft.Minecraft import Minecraft
+from Minecraft import Config
 from Minecraft import Minecraft
 
 from stable_baselines3.common.atari_wrappers import (  # isort:skip
@@ -39,7 +40,7 @@ def parse_args():
         help="if toggled, cuda will be enabled by default")
     parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="if toggled, this experiment will be tracked with Weights and Biases")
-    parser.add_argument("--wandb-project-name", type=str, default="cleanRL",
+    parser.add_argument("--wandb-project-name", type=str, default="Minecraft",
         help="the wandb's project name")
     parser.add_argument("--wandb-entity", type=str, default=None,
         help="the entity (team) of wandb's project")
@@ -53,7 +54,7 @@ def parse_args():
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=2.5e-4,
         help="the learning rate of the optimizer")
-    parser.add_argument("--num-envs", type=int, default=8,
+    parser.add_argument("--num-envs", type=int, default=1,
         help="the number of parallel game environments")
     parser.add_argument("--num-steps", type=int, default=128,
         help="the number of steps to run in each environment per policy rollout")
@@ -63,7 +64,7 @@ def parse_args():
         help="the discount factor gamma")
     parser.add_argument("--gae-lambda", type=float, default=0.95,
         help="the lambda for the general advantage estimation")
-    parser.add_argument("--num-minibatches", type=int, default=4,
+    parser.add_argument("--num-minibatches", type=int, default=1,
         help="the number of mini-batches")
     parser.add_argument("--update-epochs", type=int, default=4,
         help="the K epochs to update the policy")
@@ -122,8 +123,21 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 class Agent(nn.Module):
     def __init__(self, envs):
         super().__init__()
-        self.network = nn.Sequential(
-            layer_init(nn.Conv2d(1, 32, 8, stride=4)),
+        self.video_net = nn.Sequential(
+            layer_init(
+                nn.Conv2d(1, 32, 8, stride=4)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(64, 64, 3, stride=1)),
+            nn.ReLU(),
+            nn.Flatten(),
+            layer_init(nn.Linear(64 * 7 * 7, 512)),
+            nn.ReLU(),
+        )
+        self.audio_net = nn.Sequential(
+            layer_init(
+                nn.Conv2d(1, 32, 8, stride=4)),
             nn.ReLU(),
             layer_init(nn.Conv2d(32, 64, 4, stride=2)),
             nn.ReLU(),
@@ -143,7 +157,11 @@ class Agent(nn.Module):
         self.critic = layer_init(nn.Linear(128, 1), std=1)
 
     def get_states(self, x, lstm_state, done):
-        hidden = self.network(x / 255.0)
+        video_hidden = self.video_net(torch.index_select(x,1,torch.tensor([0]).to(device)).to(device) / 255.0)
+        audio_hidden = self.audio_net(torch.index_select(x,1,torch.tensor([1]).to(device)).to(device) / 255.0)
+        # video_hidden = self.video_net(x[:,0,:,:].unsqueeze(0) / 255.0)
+        # audio_hidden = self.audio_net(x[:,1,:,:].unsqueeze(0) / 255.0)
+        hidden = video_hidden + audio_hidden
 
         # LSTM logic
         batch_size = lstm_state[0].shape[1]
@@ -177,6 +195,8 @@ class Agent(nn.Module):
 
 if __name__ == "__main__":
     args = parse_args()
+    if Config.USE_AUDIO:
+        print('### 🔊 USING AUDIO 🔊 ###')
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     if args.track:
         import wandb
@@ -205,10 +225,12 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
-    envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name) for i in range(args.num_envs)]
-    )
-    assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
+    # envs = gym.vector.SyncVectorEnv(
+    #     [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name) for i in range(args.num_envs)]
+    # )
+    # assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
+
+    envs = make_env(args.env_id, args.seed, 0, args.capture_video, run_name)()
 
     agent = Agent(envs).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
@@ -254,8 +276,10 @@ if __name__ == "__main__":
 
             # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, reward, done, info = envs.step(action.cpu().numpy())
+            info = [info]  # original implementation had many envs
             rewards[step] = torch.tensor(reward).to(device).view(-1)
-            next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
+            next_obs, next_done = torch.Tensor(next_obs).to(
+                device), torch.Tensor(done).to(device)
 
             for item in info:
                 if "episode" in item.keys():

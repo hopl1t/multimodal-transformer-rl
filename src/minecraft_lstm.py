@@ -27,6 +27,9 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
 )
 
 
+MAX_EPISODE_LEN = 1000
+
+
 def parse_args():
     # fmt: off
     parser = argparse.ArgumentParser()
@@ -254,6 +257,9 @@ if __name__ == "__main__":
     )  # hidden and cell states (see https://youtu.be/8HyCNIVRbSU)
     num_updates = args.total_timesteps // args.batch_size
 
+    episode_rewards = np.zeros(MAX_EPISODE_LEN)
+    episode = 0
+    
     for update in range(1, num_updates + 1):
         initial_lstm_state = (next_lstm_state[0].clone(), next_lstm_state[1].clone())
         # Annealing the rate if instructed to do so.
@@ -278,15 +284,27 @@ if __name__ == "__main__":
             next_obs, reward, done, info = envs.step(action.cpu().numpy())
             info = [info]  # original implementation had many envs
             rewards[step] = torch.tensor(reward).to(device).view(-1)
+            episode_rewards[step] = reward
             next_obs, next_done = torch.Tensor(next_obs).to(
                 device), torch.Tensor(done).to(device)
 
-            for item in info:
-                if "episode" in item.keys():
-                    print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
-                    writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
-                    writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
-                    break
+            if done[0]:
+                episode_reward = episode_rewards.sum()
+                episode_rewards = np.zeros(MAX_EPISODE_LEN)
+                episode += 1
+                print(
+                    f"episode #{episode}, global_step={global_step}, episodic_return={episode_reward}")
+                writer.add_scalar("charts/episodic_reward",
+                                  episode_reward, global_step)
+                writer.add_scalar("charts/episodic_length", step, global_step)
+
+
+            # for item in info:
+            #     if "episode" in item.keys():
+            #         print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
+            #         writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
+            #         writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
+            #         break
 
         # bootstrap value if not done
         with torch.no_grad():

@@ -28,6 +28,7 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
 
 
 MAX_EPISODE_LEN = 1000
+SAVE_INTERVAL = 10000
 
 
 def parse_args():

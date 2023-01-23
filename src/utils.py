@@ -110,6 +110,8 @@ def parse_args():
         help="Maximal length of a single episode")
     parser.add_argument("--policy-offset", type=float, default=0.5,
         help="Offsets policy dist to reduce it's std and increase exploration")
+    parser.add_argument("--max-episodes", type=int, default=1000000,
+        help="Offsets policy dist to reduce it's std and increase exploration")
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)

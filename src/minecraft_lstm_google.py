@@ -180,11 +180,6 @@ if __name__ == "__main__":
 
     for update in range(initial_update, num_updates + 1):
         initial_lstm_state = (next_lstm_state[0].clone(), next_lstm_state[1].clone())
-        # Annealing the rate if instructed to do so.
-        if args.anneal_lr:
-            frac = 1.0 - (update - 1.0) / num_updates
-            lrnow = frac * args.learning_rate
-            optimizer.param_groups[0]["lr"] = lrnow
 
         for step in range(0, args.num_steps):
             global_step += 1 * args.num_envs
@@ -210,6 +205,12 @@ if __name__ == "__main__":
                 episode_reward = episode_rewards.sum()
                 episode_rewards = np.zeros(args.max_episode_len)
                 episode += 1
+                # Annealing the rate if instructed to do so.
+                if args.anneal_lr:
+                    frac = 1.0 - (episode - 1.0) / args.max_episodes
+                    lrnow = frac * args.learning_rate
+                    optimizer.param_groups[0]["lr"] = lrnow
+
                 print(
                     f"episode #{episode}, global_step={global_step}, episodic_return={episode_reward}, lr={optimizer.param_groups[0]['lr']}")
                 writer.add_scalar("charts/episodic_reward",

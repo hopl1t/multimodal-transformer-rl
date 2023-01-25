@@ -25,6 +25,7 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
 )
 
 from utils import save_run, load_run, parse_args, make_minecraft_env, layer_init
+from agents import Agent
 
 
 def make_env(env_id, seed, idx, capture_video, run_name):
@@ -41,101 +42,11 @@ def make_env(env_id, seed, idx, capture_video, run_name):
     return thunk
 
 
-class Agent(nn.Module):
-    def __init__(self, envs):
-        super().__init__()
-        self.video_net = nn.Sequential(
-            layer_init(
-                nn.Conv2d(1, 32, 8, stride=4)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(64, 64, 3, stride=1)),
-            nn.ReLU(),
-            nn.Flatten(),
-            layer_init(nn.Linear(64 * 7 * 7, 512)),
-            nn.ReLU(),
-        )
-        self.audio_net = nn.Sequential(
-            layer_init(
-                nn.Conv2d(1, 32, 8, stride=4)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(64, 64, 3, stride=1)),
-            nn.ReLU(),
-            nn.Flatten(),
-            layer_init(nn.Linear(64 * 7 * 7, 512)),
-            nn.ReLU(),
-        )
-        self.lstm = nn.LSTM(512, 128)
-        for name, param in self.lstm.named_parameters():
-            if "bias" in name:
-                nn.init.constant_(param, 0)
-            elif "weight" in name:
-                nn.init.orthogonal_(param, 1.0)
-        self.actor = layer_init(nn.Linear(128, envs.single_action_space.n), std=0.01)
-        self.critic = layer_init(nn.Linear(128, 1), std=1)
-
-    def get_states(self, x, lstm_state, done):
-        video_hidden = self.video_net(torch.index_select(x,1,torch.tensor([0]).to(device)).to(device) / 255.0)
-        audio_hidden = self.audio_net(torch.index_select(x,1,torch.tensor([1]).to(device)).to(device) / 255.0)
-        # video_hidden = self.video_net(x[:,0,:,:].unsqueeze(0) / 255.0)
-        # audio_hidden = self.audio_net(x[:,1,:,:].unsqueeze(0) / 255.0)
-        hidden = video_hidden + audio_hidden
-
-        # LSTM logic
-        batch_size = lstm_state[0].shape[1]
-        hidden = hidden.reshape((-1, batch_size, self.lstm.input_size))
-        done = done.reshape((-1, batch_size))
-        new_hidden = []
-        for h, d in zip(hidden, done):
-            h, lstm_state = self.lstm(
-                h.unsqueeze(0),
-                (
-                    (1.0 - d).view(1, -1, 1) * lstm_state[0],
-                    (1.0 - d).view(1, -1, 1) * lstm_state[1],
-                ),
-            )
-            new_hidden += [h]
-        new_hidden = torch.flatten(torch.cat(new_hidden), 0, 1)
-        return new_hidden, lstm_state
-
-    def get_value(self, x, lstm_state, done):
-        hidden, _ = self.get_states(x, lstm_state, done)
-        return self.critic(hidden)
-
-    def get_action_and_value(self, x, lstm_state, done, action=None):
-        hidden, lstm_state = self.get_states(x, lstm_state, done)
-        logits = self.actor(hidden)
-        probs = Categorical(logits=logits)
-        if action is None:
-            action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), lstm_state
-
-
 if __name__ == "__main__":
     args = parse_args()
     if Config.USE_AUDIO:
         print('### 🔊 USING AUDIO 🔊 ###')
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    if args.track:
-        import wandb
-
-        wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            sync_tensorboard=True,
-            config=vars(args),
-            name=run_name,
-            monitor_gym=True,
-            save_code=True,
-        )
-    writer = SummaryWriter(f"runs/{run_name}")
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
 
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
@@ -145,15 +56,9 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    # env setup
-    # envs = gym.vector.SyncVectorEnv(
-    #     [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name) for i in range(args.num_envs)]
-    # )
-    # assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
-
     envs = make_env(args.env_id, args.seed, 0, args.capture_video, run_name)()
 
-    agent = Agent(envs).to(device)
+    agent = Agent(envs, device, conv_type=args.conv_size, attn_type=args.attn_type, fusion_type=args.fusion_type).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -177,8 +82,31 @@ if __name__ == "__main__":
 
     episode_rewards = np.zeros(args.max_episode_len)
     episode = 0
+    initial_update = 1
+
+    if args.load_from:
+        agent, run_name, args, optimizer, global_step, episode, initial_update = load_run(args.load_from)
+
+    if args.track:
+        import wandb
+
+        wandb.init(
+            project=args.wandb_project_name,
+            entity=args.wandb_entity,
+            sync_tensorboard=True,
+            config=vars(args),
+            name=run_name,
+            monitor_gym=True,
+            save_code=True,
+        )
+    writer = SummaryWriter(f"runs/{run_name}")
+    writer.add_text(
+        "hyperparameters",
+        "|param|value|\n|-|-|\n%s" % (
+            "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+    )
     
-    for update in range(1, num_updates + 1):
+    for update in range(initial_update, num_updates + 1):
         initial_lstm_state = (next_lstm_state[0].clone(), next_lstm_state[1].clone())
 
         for step in range(0, args.num_steps):
@@ -325,5 +253,12 @@ if __name__ == "__main__":
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
+        # save agent
+        if (not episode % args.save_interval) and episode and args.save_interval:
+            save_run(agent, run_name, args, optimizer,
+                     global_step, episode, initial_update)
+
+    save_run(agent, run_name, args, optimizer,
+             global_step, episode, initial_update)
     envs.close()
     writer.close()

@@ -112,6 +112,12 @@ def parse_args():
         help="Offsets policy dist to reduce it's std and increase exploration")
     parser.add_argument("--max-episodes", type=int, default=1000000,
         help="Offsets policy dist to reduce it's std and increase exploration")
+    parser.add_argument("--attn-type", type=str, default=None,
+        help="Attention type to use, either: None if not specified, 'casl' or 'new'")
+    parser.add_argument("--fusion-type", type=str, default='concat',
+        help="How to fuse feautres: either 'sum' or 'concat'")
+    parser.add_argument("--conv-size", type=str, default='big',
+        help="Size of initial mutual conv layers: either 'big' or 'small'")
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)

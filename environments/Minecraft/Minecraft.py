@@ -12,17 +12,18 @@ from gym.spaces.discrete import Discrete
 
 class Actions():
     def __init__(self):
-        self.NULL = 0
-        self.UP = 1
-        self.DOWN = 2
-        self.RIGHT = 3
-        self.LEFT = 4
+        # self.NULL = 0
+        self.UP = 0
+        self.DOWN = 1
+        self.RIGHT = 2
+        self.LEFT = 3
 
         self.num_actions = sum(1 for attribute in dir(self) if not attribute.startswith('__'))
 
 
 class Minecraft():
-    def __init__(self):
+    def __init__(self, env_id=1):
+        self.env_id = env_id
         self.env_row = Config.ENV_ROW
         self.env_col = Config.ENV_COL
         self.max_iter = Config.MAX_ITER
@@ -53,11 +54,15 @@ class Minecraft():
             shape = (2, 84, 84)
         else:
             shape = (1, 84, 84)
-        self.single_observation_space = Box(0, 4, shape, np.uint8)
-        self.single_action_space = Discrete(5)
+        self.observation_space = Box(0, 4, shape, np.float32)
+        self.action_space =  Discrete(Actions().num_actions)
+        
 
-    def close():
+    def close(self):
         pass
+
+    def seed(self, seed_value):
+        np.random.seed(seed_value)
 
     #########################################################################
     # ENV-RELATED
@@ -134,7 +139,8 @@ class Minecraft():
             next_observation.append(self.agent_loc)
 
         # second expansion because there are many environments in the cleanrl implementation
-        return np.expand_dims(next_observation, 0)
+        # return np.expand_dims(next_observation, 0)
+        return next_observation
 
     def _get_image_and_audio(self, show_gt=False):
         image = self._preprocess_img(show_gt=show_gt)
@@ -208,7 +214,7 @@ class Minecraft():
             game_over = True
             self.reset(reset_time=True)
 
-        return next_observation, reward, (game_over,), {'lives': 1, 'episode_frame_number': self.count_iter, 'frame_number': self.count_iter}  # {} = info in gym for many envs, tuple - for cleanrl compatability
+        return next_observation, reward, game_over, {'lives': 1, 'episode_frame_number': self.count_iter, 'frame_number': self.count_iter}  # {} = info in gym for many envs, tuple - for cleanrl compatability
 
     #########################################################################
     # AUDIO-RELATED

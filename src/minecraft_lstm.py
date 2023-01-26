@@ -28,15 +28,16 @@ from utils import save_run, load_run, parse_args, make_minecraft_env, layer_init
 from agents import Agent
 
 
-def make_env(env_id, seed, idx, capture_video, run_name):
+def make_env(seed, idx, capture_video, run_name):
     def thunk():
-        env = Minecraft()
+        env = Minecraft(env_id=idx)
+        env.seed(seed)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         _ = env.reset()
-        env = ClipRewardEnv(env)
+        # env = ClipRewardEnv(env)  # We probably shouldnt use this in minecraft, the reward normalization is enough
         return env
 
     return thunk
@@ -56,7 +57,13 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    envs = make_env(args.env_id, args.seed, 0, args.capture_video, run_name)()
+    # envs = make_env(args.seed, 0, args.capture_video, run_name)()
+
+    envs = gym.vector.SyncVectorEnv(
+        [make_env(args.seed + i, i, args.capture_video, run_name)
+         for i in range(args.num_envs)]
+    )
+
 
     agent = Agent(envs, device, conv_type=args.conv_size, attn_type=args.attn_type, fusion_type=args.fusion_type).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
@@ -80,7 +87,7 @@ if __name__ == "__main__":
     )  # hidden and cell states (see https://youtu.be/8HyCNIVRbSU)
     num_updates = args.total_timesteps // args.batch_size
 
-    episode_rewards = np.zeros(args.max_episode_len)
+    episode_rewards = np.zeros((args.max_episode_len, args.num_envs))
     episode = 0
     initial_update = 1
 
@@ -129,20 +136,25 @@ if __name__ == "__main__":
             next_obs, next_done = torch.Tensor(next_obs).to(
                 device), torch.Tensor(done).to(device)
 
-            if done[0]:
-                episode_reward = episode_rewards.sum()
-                episode_rewards = np.zeros(args.max_episode_len)
-                episode += 1
+            if any(done):
+                done_episodes = np.atleast_1d(done).nonzero()[0]
+                # episode_reward = episode_rewards.sum()  # sums over all envs
+                # takes only the some of the finished episode
+                done_episode_rewards = episode_rewards.sum(axis=0)[done_episodes]
+                episode_rewards[:, done_episodes] = np.zeros_like(episode_rewards[:, done_episodes])
+                # episode_rewards = np.zeros((args.max_episode_len, args.num_envs))
+                episode += len(done_episodes)
                 # Annealing the rate if instructed to do so.
-                if args.anneal_lr:
-                    frac = 1.0 - (episode - 1.0) / args.max_episodes
-                    lrnow = frac * args.learning_rate
-                    optimizer.param_groups[0]["lr"] = lrnow
-                print(
-                    f"episode #{episode}, global_step={global_step}, episodic_return={episode_reward}")
-                writer.add_scalar("charts/episodic_reward",
-                                  episode_reward, global_step)
-                writer.add_scalar("charts/episodic_length", step, global_step)
+                for episode_reward in done_episode_rewards:
+                    if args.anneal_lr:
+                        frac = 1.0 - (episode - 1.0) / args.max_episodes
+                        lrnow = frac * args.learning_rate
+                        optimizer.param_groups[0]["lr"] = lrnow
+                    print(
+                        f"episode #{episode}, global_step={global_step}, episodic_return={episode_reward}, new lr={optimizer.param_groups[0]['lr']}")
+                    writer.add_scalar("charts/episodic_reward",
+                                    episode_reward, global_step)
+                    writer.add_scalar("charts/episodic_length", step, global_step)
 
         # bootstrap value if not done
         with torch.no_grad():

@@ -65,7 +65,7 @@ def parse_args():
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="BreakoutNoFrameskip-v4",
+    parser.add_argument("--env-id", type=str, default="minecraft",
         help="the id of the environment")
     parser.add_argument("--total-timesteps", type=int, default=10000000,
         help="total timesteps of the experiments")
@@ -118,6 +118,8 @@ def parse_args():
         help="How to fuse feautres: either 'sum' or 'concat'")
     parser.add_argument("--conv-size", type=str, default='big',
         help="Size of initial mutual conv layers: either 'big' or 'small'")
+    parser.add_argument("--print-interval", type=int, default=1,
+        help="Print stats to stdout every so episodes")
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)

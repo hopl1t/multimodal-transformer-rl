@@ -25,21 +25,41 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
 )
 
 from utils import save_run, load_run, parse_args, make_minecraft_env, layer_init
-from agents import Agent
+from agents import MinecraftAgent, GymAgent
 
 
-def make_env(seed, idx, capture_video, run_name):
-    def thunk():
-        env = Minecraft(env_id=idx)
-        env.seed(seed)
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        if capture_video:
-            if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        _ = env.reset()
-        # env = ClipRewardEnv(env)  # We probably shouldnt use this in minecraft, the reward normalization is enough
-        return env
-
+def make_env(env_id, seed, idx, capture_video, run_name):
+    if not env_id:
+        def thunk():
+            env = Minecraft(env_id=idx)
+            env.seed(seed)
+            env = gym.wrappers.RecordEpisodeStatistics(env)
+            if capture_video:
+                if idx == 0:
+                    env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+            _ = env.reset()
+            # env = ClipRewardEnv(env)  # We probably shouldnt use this in minecraft, the reward normalization is enough
+            return env
+    else:
+        def thunk():
+            env = gym.make(env_id)
+            env = gym.wrappers.RecordEpisodeStatistics(env)
+            if capture_video:
+                if idx == 0:
+                    env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+            env = NoopResetEnv(env, noop_max=30)
+            env = MaxAndSkipEnv(env, skip=4)
+            env = EpisodicLifeEnv(env)
+            if "FIRE" in env.unwrapped.get_action_meanings():
+                env = FireResetEnv(env)
+            env = ClipRewardEnv(env)
+            env = gym.wrappers.ResizeObservation(env, (84, 84))
+            env = gym.wrappers.GrayScaleObservation(env)
+            env = gym.wrappers.FrameStack(env, 1)
+            env.seed(seed)
+            env.action_space.seed(seed)
+            env.observation_space.seed(seed)
+            return env
     return thunk
 
 
@@ -60,12 +80,15 @@ if __name__ == "__main__":
     # envs = make_env(args.seed, 0, args.capture_video, run_name)()
 
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args.seed + i, i, args.capture_video, run_name)
+        [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name)
          for i in range(args.num_envs)]
     )
 
-
-    agent = Agent(envs, device, conv_type=args.conv_size, attn_type=args.attn_type, fusion_type=args.fusion_type).to(device)
+    if args.env_id.lower() == "minecraft":
+        agent = MinecraftAgent(envs, device, conv_type=args.conv_size, attn_type=args.attn_type, fusion_type=args.fusion_type).to(device)
+    else:
+        agent = GymAgent(envs, conv_type=args.conv_size).to(device)
+    
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -150,11 +173,11 @@ if __name__ == "__main__":
                         frac = 1.0 - (episode - 1.0) / args.max_episodes
                         lrnow = frac * args.learning_rate
                         optimizer.param_groups[0]["lr"] = lrnow
-                    print(
-                        f"episode #{episode}, global_step={global_step}, episodic_return={episode_reward}, new lr={optimizer.param_groups[0]['lr']}")
                     writer.add_scalar("charts/episodic_reward",
                                     episode_reward, global_step)
                     writer.add_scalar("charts/episodic_length", step, global_step)
+                    if not (episode % args.print_interval):
+                        print(f"episode #{episode}, global_step={global_step}, episodic_return={episode_reward}, new lr={optimizer.param_groups[0]['lr']}")
 
         # bootstrap value if not done
         with torch.no_grad():

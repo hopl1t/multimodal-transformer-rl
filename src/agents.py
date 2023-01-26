@@ -90,7 +90,7 @@ class NewAttention(nn.Module):
         return video_features, audio_features, attention_weights
 
 
-class Agent(nn.Module):
+class MinecraftAgent(nn.Module):
     def __init__(self, envs, device, conv_type='big', attn_type=None, fusion_type='concat'):
         super().__init__()
         print(
@@ -127,10 +127,8 @@ class Agent(nn.Module):
         self.device = device
 
     def get_states(self, x, lstm_state, done):
-        video_features = self.video_net(torch.index_select(
-            x, 1, torch.tensor([0]).to(self.device)).to(self.device) / 255.0)
-        audio_features = self.audio_net(torch.index_select(
-            x, 1, torch.tensor([1]).to(self.device)).to(self.device) / 255.0)
+        video_features = self.video_net(torch.index_select(x, 1, torch.tensor([0]).to(self.device)).to(self.device) / 255.0)
+        audio_features = self.audio_net(torch.index_select(x, 1, torch.tensor([1]).to(self.device)).to(self.device) / 255.0)
         if self.attn_type:
             video_features, audio_features, attn_weights = self.attn(video_features, audio_features, lstm_state)
         if self.fusion_type == 'concat':
@@ -145,6 +143,53 @@ class Agent(nn.Module):
         done = done.reshape((-1, batch_size))
         new_hidden = []
         for h, d in zip(fused_features, done):
+            h, lstm_state = self.lstm(
+                h.unsqueeze(0),
+                (
+                    (1.0 - d).view(1, -1, 1) * lstm_state[0],
+                    (1.0 - d).view(1, -1, 1) * lstm_state[1],
+                ),
+            )
+            new_hidden += [h]
+        new_hidden = torch.flatten(torch.cat(new_hidden), 0, 1)
+        return new_hidden, lstm_state
+
+    def get_value(self, x, lstm_state, done):
+        hidden, _ = self.get_states(x, lstm_state, done)
+        return self.critic(hidden)
+
+    def get_action_and_value(self, x, lstm_state, done, action=None):
+        hidden, lstm_state = self.get_states(x, lstm_state, done)
+        logits = self.actor(hidden)
+        probs = Categorical(logits=logits)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), lstm_state
+
+
+class GymAgent(nn.Module):
+    def __init__(self, envs, conv_type='big'):
+        super().__init__()
+        self.video_net = conv_factory(conv_type)
+
+        self.lstm = nn.LSTM(512, 128)
+        for name, param in self.lstm.named_parameters():
+            if "bias" in name:
+                nn.init.constant_(param, 0)
+            elif "weight" in name:
+                nn.init.orthogonal_(param, 1.0)
+        self.actor = layer_init(
+            nn.Linear(128, envs.single_action_space.n), std=0.01)
+        self.critic = layer_init(nn.Linear(128, 1), std=1)
+
+    def get_states(self, x, lstm_state, done):
+        hidden = self.video_net(x / 255.0)
+        # LSTM logic
+        batch_size = lstm_state[0].shape[1]
+        hidden = hidden.reshape((-1, batch_size, self.lstm.input_size))
+        done = done.reshape((-1, batch_size))
+        new_hidden = []
+        for h, d in zip(hidden, done):
             h, lstm_state = self.lstm(
                 h.unsqueeze(0),
                 (

@@ -20,7 +20,7 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
     ClipRewardEnv,
 )
 
-def save_run(agent, run_name, args, optimizer, global_step, episode, initial_update):
+def save_run(agent, run_name, args, optimizer, global_step, episode_count, initial_update):
     save_path = path.join(args.save_dir, run_name + '.pkl')
     run_dict = {
         'agent': agent,
@@ -28,7 +28,7 @@ def save_run(agent, run_name, args, optimizer, global_step, episode, initial_upd
         'args': args,
         'optimizer': optimizer,
         'global_step': global_step,
-        'episode': episode,
+        'episode_count': episode_count,
         'initial_update': initial_update
 
     }
@@ -41,7 +41,7 @@ def load_run(pkl_path):
     with open(pkl_path, 'rb') as f:
         run_dict = pickle.load(f)
         print(f'💾 Loaded run from {pkl_path} 💾')
-    return run_dict['agent'], run_dict['run_name'], run_dict['args'], run_dict['optimizer'], run_dict['global_step'], run_dict['episode'], run_dict['initial_update']
+    return run_dict['agent'], run_dict['run_name'], run_dict['args'], run_dict['optimizer'], run_dict['global_step'], run_dict['episode_count'], run_dict['initial_update']
 
 
 def parse_args():
@@ -57,7 +57,7 @@ def parse_args():
         help="if toggled, cuda will be enabled by default")
     parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="if toggled, this experiment will be tracked with Weights and Biases")
-    parser.add_argument("--wandb-project-name", type=str, default="cleanRL",
+    parser.add_argument("--wandb-project-name", type=str, default="minecraft",
         help="the wandb's project name")
     parser.add_argument("--wandb-entity", type=str, default=None,
         help="the entity (team) of wandb's project")

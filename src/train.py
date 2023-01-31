@@ -115,11 +115,11 @@ if __name__ == "__main__":
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
 
     episode_rewards = np.zeros((args.max_episode_len, args.num_envs))
-    episode = 0
+    episode_count = 0
     initial_update = 1
 
     if args.load_from:
-        agent, run_name, args, optimizer, global_step, episode, initial_update = load_run(args.load_from)
+        agent, run_name, args, optimizer, global_step, episode_count, initial_update = load_run(args.load_from)
         agent.to(device)
 
     # TRY NOT TO MODIFY: start the game
@@ -156,37 +156,16 @@ if __name__ == "__main__":
             # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, reward, done, info = envs.step(action.cpu().numpy())
             rewards[step] = torch.tensor(reward).to(device).view(-1)
-            # episode_rewards[step] = reward.copy()
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
 
             for item in info:
                 if "episode" in item.keys():
-                    if not (episode % args.print_interval):
-                        print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
+                    if not (episode_count % args.print_interval):
+                        print(f"episode={episode_count}, global_step={global_step}, episodic_return={item['episode']['r']}")
                     writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
                     writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
+                    episode_count += 1
                     break
-
-            # New metrics
-            # if any(done):
-            #     done_episodes = np.atleast_1d(done).nonzero()[0]
-            #     # episode_reward = episode_rewards.sum()  # sums over all envs
-            #     # takes only the some of the finished episode
-            #     done_episode_rewards = episode_rewards.sum(axis=0)[done_episodes]
-            #     episode_rewards[:, done_episodes] = np.zeros_like(episode_rewards[:, done_episodes])
-            #     # episode_rewards = np.zeros((args.max_episode_len, args.num_envs))
-            #     episode += len(done_episodes)
-            #     # Annealing the rate if instructed to do so.
-            #     for episode_reward in done_episode_rewards:
-            #         # if args.anneal_lr:
-            #         #     frac = 1.0 - (episode - 1.0) / args.max_episodes
-            #         #     lrnow = frac * args.learning_rate
-            #         #     optimizer.param_groups[0]["lr"] = lrnow
-            #         writer.add_scalar("charts/episodic_reward_new",
-            #                         episode_reward, global_step)
-            #         # if not (episode % args.print_interval):
-            #         #     print(f"episode #{episode}, global_step={global_step}, episodic_return={episode_reward}, new lr={optimizer.param_groups[0]['lr']}")
-
 
         # bootstrap value if not done
         with torch.no_grad():
@@ -294,15 +273,16 @@ if __name__ == "__main__":
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
-        print("SPS:", int(global_step / (time.time() - start_time)))
+        if not (episode_count % (args.print_interval * 50)):
+            print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
         # save agent
-        if (not episode % args.save_interval) and episode and args.save_interval:
+        if (not episode_count % args.save_interval) and episode_count and args.save_interval:
             save_run(agent, run_name, args, optimizer,
-                     global_step, episode, initial_update)
+                     global_step, episode_count, initial_update)
 
     save_run(agent, run_name, args, optimizer,
-             global_step, episode, initial_update)
+             global_step, episode_count, initial_update)
     envs.close()
     writer.close()

@@ -85,6 +85,10 @@ def parse_args():
         help="the maximum norm for the gradient clipping")
     parser.add_argument("--target-kl", type=float, default=None,
         help="the target KL divergence threshold")
+    # new args
+    parser.add_argument("--clip-reward", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
+        help="Toggles whether or not to use a clipped reward env wrapper.")
+    
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
@@ -92,7 +96,7 @@ def parse_args():
     return args
 
 
-def make_env(env_id, seed, idx, capture_video, run_name):
+def make_env(env_id, seed, idx, capture_video, run_name, clip_reward):
     def thunk():
         env = Minecraft()
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -105,7 +109,8 @@ def make_env(env_id, seed, idx, capture_video, run_name):
         # env = EpisodicLifeEnv(env)
         # if "FIRE" in env.unwrapped.get_action_meanings():
         #     env = FireResetEnv(env)
-        env = ClipRewardEnv(env)
+        if clip_reward:
+            env = ClipRewardEnv(env)
         # env = gym.wrappers.ResizeObservation(env, (84, 84))  # both video and audio already 84x84
         # env = gym.wrappers.GrayScaleObservation(env)  # already grayscale
         # env = gym.wrappers.FrameStack(env, 1)  # no need for this, no motion to capture in Minecraft
@@ -200,6 +205,8 @@ if __name__ == "__main__":
     args = parse_args()
     if Config.USE_AUDIO:
         print('### 🔊 USING AUDIO 🔊 ###')
+    if args.clip_reward:
+        print('### ✂️ CLIPPING REWARDS ✂️ ###')
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     if args.track:
         import wandb
@@ -233,7 +240,7 @@ if __name__ == "__main__":
     # )
     # assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    envs = make_env(args.env_id, args.seed, 0, args.capture_video, run_name)()
+    envs = make_env(args.env_id, args.seed, 0, args.capture_video, run_name, args.clip_reward)()
 
     agent = Agent(envs).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)

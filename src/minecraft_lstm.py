@@ -165,10 +165,10 @@ class Agent(nn.Module):
         self.critic = layer_init(nn.Linear(128, 1), std=1)
 
     def get_states(self, x, lstm_state, done):
-        video_hidden = self.video_net(torch.index_select(x,1,torch.tensor([0]).to(device)).to(device) / 255.0)
-        audio_hidden = self.audio_net(torch.index_select(x,1,torch.tensor([1]).to(device)).to(device) / 255.0)
-        # video_hidden = self.video_net(x[:,0,:,:].unsqueeze(0) / 255.0)
-        # audio_hidden = self.audio_net(x[:,1,:,:].unsqueeze(0) / 255.0)
+        # video_hidden = self.video_net(torch.index_select(x,1,torch.tensor([0]).to(device)).to(device) / 255.0)
+        # audio_hidden = self.audio_net(torch.index_select(x,1,torch.tensor([1]).to(device)).to(device) / 255.0)
+        video_hidden = self.video_net(torch.index_select(x,1,torch.tensor([0]).to(device)).to(device))
+        audio_hidden = self.audio_net(torch.index_select(x,1,torch.tensor([1]).to(device)).to(device))
         hidden = video_hidden + audio_hidden
 
         # LSTM logic

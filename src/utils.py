@@ -120,6 +120,8 @@ def parse_args():
         help="Size of initial mutual conv layers: either 'big' or 'small'")
     parser.add_argument("--print-interval", type=int, default=1,
         help="Print stats to stdout every so episodes")
+    parser.add_argument("--clip-rewards", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
+        help="if toggled clips env rewards as used in algo to -1 or 1 (ie thier sign)")
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)

@@ -26,7 +26,7 @@ from Minecraft import Minecraft
 from utils import save_run, load_run, parse_args, make_minecraft_env, layer_init
 
 
-def make_env(env_id, seed, idx, capture_video, run_name):
+def make_env(env_id, seed, idx, capture_video, run_name, clip_rewards):
     def thunk_atari():
         env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -54,7 +54,8 @@ def make_env(env_id, seed, idx, capture_video, run_name):
                 if idx == 0:
                     env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
             _ = env.reset()
-            # env = ClipRewardEnv(env)  # We probably shouldnt use this in minecraft, the reward normalization is enough
+            if clip_rewards:
+                env = ClipRewardEnv(env)
             return env
     if env_id == 'minecraft':
         thunk = thunk_minecraft
@@ -96,12 +97,12 @@ if __name__ == "__main__":
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name) for i in range(args.num_envs)]
+        [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name, args.clip_rewards) for i in range(args.num_envs)]
     )
 
     # agent = Agent(envs).to(device)
     if args.env_id == 'minecraft':
-        agent = MinecraftAgent(envs, device).to(device)
+        agent = MinecraftAgent(envs, device, conv_type=args.conv_size, attn_type=args.attn_type, fusion_type=args.fusion_type).to(device)
     else:
         agent = OldAgent(envs).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)

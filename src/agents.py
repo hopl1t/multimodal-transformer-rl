@@ -102,7 +102,10 @@ class MinecraftAgent(nn.Module):
         else:
             self.feature_size = 256
         if not attn_type:
-            self.lstm_size = self.feature_size * 2
+            if self.fusion_type == 'concat':
+                self.lstm_size = self.feature_size * 2
+            if self.fusion_type == 'sum':
+                self.lstm_size = self.feature_size
         else:
             self.lstm_size =  self.feature_size
             if attn_type == 'casl':
@@ -134,7 +137,8 @@ class MinecraftAgent(nn.Module):
         if self.fusion_type == 'concat':
             fused_features = torch.cat([video_features, audio_features])
         elif self.fusion_type == 'sum':
-            fused_features = torch.cat((video_features, audio_features), dim=1)
+            # fused_features = torch.cat((video_features, audio_features), dim=1)
+            fused_features = video_features + audio_features
         else:
             raise NotImplementedError
         # LSTM logic

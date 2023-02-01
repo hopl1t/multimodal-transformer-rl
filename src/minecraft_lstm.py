@@ -25,7 +25,7 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
     MaxAndSkipEnv,
     NoopResetEnv,
 )
-
+from agents import MinecraftAgent
 
 MAX_EPISODE_LEN = 1000
 
@@ -88,7 +88,14 @@ def parse_args():
     # new args
     parser.add_argument("--clip-reward", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="Toggles whether or not to use a clipped reward env wrapper.")
-    
+    parser.add_argument("--conv-type", type=str, default="big",
+        help="type of conv to use")
+    parser.add_argument("--attn-type", type=str, default="",
+        help="type of attn to use")
+    parser.add_argument("--fusion-type", type=str, default="sum",
+        help="type of fusion to use")
+    parser.add_argument("--print-interval", type=int, default=1,
+        help="print every")
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
@@ -242,7 +249,8 @@ if __name__ == "__main__":
 
     envs = make_env(args.env_id, args.seed, 0, args.capture_video, run_name, args.clip_reward)()
 
-    agent = Agent(envs).to(device)
+    # agent = Agent(envs).to(device)
+    agent = MinecraftAgent(envs, device, args.conv_type, args.attn_type, args.fusion_type)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -299,19 +307,21 @@ if __name__ == "__main__":
                 episode_reward = episode_rewards.sum()
                 episode_rewards = np.zeros(MAX_EPISODE_LEN)
                 episode += 1
-                print(
-                    f"episode #{episode}, global_step={global_step}, episodic_return={episode_reward}")
+                # print(
+                #     f"episode #{episode}, global_step={global_step}, episodic_return={episode_reward}")
                 writer.add_scalar("charts/episodic_reward",
                                   episode_reward, global_step)
                 writer.add_scalar("charts/episodic_length", step, global_step)
 
 
-            # for item in info:
-            #     if "episode" in item.keys():
-            #         print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
-            #         writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
-            #         writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
-            #         break
+            for item in info:
+                if "episode" in item.keys():
+                    if not (episode % args.print_interval) and episode:
+                        print(
+                            f"episode #{episode}, global_step={global_step}, episodic_return={item['episode']['r']}")
+                    writer.add_scalar("charts/episodic_return_old", item["episode"]["r"], global_step)
+                    writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
+                    break
 
         # bootstrap value if not done
         with torch.no_grad():
@@ -419,7 +429,8 @@ if __name__ == "__main__":
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
-        print("SPS:", int(global_step / (time.time() - start_time)))
+        if not (episode % (args.print_interval * 20)) and episode:
+            print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     envs.close()

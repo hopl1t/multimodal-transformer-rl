@@ -96,6 +96,8 @@ def parse_args():
         help="type of fusion to use")
     parser.add_argument("--print-interval", type=int, default=1,
         help="print every")
+    parser.add_argument("--agent-type", type=str, default="old",
+        help="old or new")
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
@@ -172,10 +174,10 @@ class Agent(nn.Module):
         self.critic = layer_init(nn.Linear(128, 1), std=1)
 
     def get_states(self, x, lstm_state, done):
-        # video_hidden = self.video_net(torch.index_select(x,1,torch.tensor([0]).to(device)).to(device) / 255.0)
-        # audio_hidden = self.audio_net(torch.index_select(x,1,torch.tensor([1]).to(device)).to(device) / 255.0)
-        video_hidden = self.video_net(torch.index_select(x,1,torch.tensor([0]).to(device)).to(device))
-        audio_hidden = self.audio_net(torch.index_select(x,1,torch.tensor([1]).to(device)).to(device))
+        video_hidden = self.video_net(torch.index_select(x,1,torch.tensor([0]).to(device)).to(device) / 255.0)
+        audio_hidden = self.audio_net(torch.index_select(x,1,torch.tensor([1]).to(device)).to(device) / 255.0)
+        # video_hidden = self.video_net(torch.index_select(x,1,torch.tensor([0]).to(device)).to(device))
+        # audio_hidden = self.audio_net(torch.index_select(x,1,torch.tensor([1]).to(device)).to(device))
         hidden = video_hidden + audio_hidden
 
         # LSTM logic
@@ -240,6 +242,10 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    if device == torch.device('cuda'):
+        print("### USING CUDA ###")
+    else:
+        print("### USING CPU ###")
 
     # env setup
     # envs = gym.vector.SyncVectorEnv(
@@ -249,8 +255,13 @@ if __name__ == "__main__":
 
     envs = make_env(args.env_id, args.seed, 0, args.capture_video, run_name, args.clip_reward)()
 
-    # agent = Agent(envs).to(device)
-    agent = MinecraftAgent(envs, device, args.conv_type, args.attn_type, args.fusion_type)
+    if args.agent_type == 'old':
+        print("### USING LEGACY AGENT ###")
+        agent = Agent(envs).to(device)
+    else:
+        print("### USING NEW AGENT ###")
+        agent = MinecraftAgent(envs, device, args.conv_type,
+                               args.attn_type, args.fusion_type).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -297,13 +308,16 @@ if __name__ == "__main__":
 
             # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, reward, done, info = envs.step(action.cpu().numpy())
+            # 2 remarks: I don't use vector env so have to manually reset, lstm is reset in get_action_and_value
+            if done:
+                next_obs = envs.reset()
             info = [info]  # original implementation had many envs
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             episode_rewards[step] = reward
             next_obs, next_done = torch.Tensor(next_obs).to(
-                device), torch.Tensor(done).to(device)
+                device), torch.Tensor((done,)).to(device)
 
-            if done[0]:
+            if done:
                 episode_reward = episode_rewards.sum()
                 episode_rewards = np.zeros(MAX_EPISODE_LEN)
                 episode += 1

@@ -208,7 +208,7 @@ class Minecraft():
             game_over = True
             self.reset(reset_time=True)
 
-        return next_observation, reward, (game_over,), {'lives': 1, 'episode_frame_number': self.count_iter, 'frame_number': self.count_iter}  # {} = info in gym for many envs, tuple - for cleanrl compatability
+        return next_observation, reward, game_over, {'lives': 1, 'episode_frame_number': self.count_iter, 'frame_number': self.count_iter}  # {} = info in gym for many envs, tuple - for cleanrl compatability
 
     #########################################################################
     # AUDIO-RELATED

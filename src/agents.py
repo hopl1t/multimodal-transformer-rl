@@ -302,6 +302,10 @@ class ESRAgent(nn.Module):
                     nn.init.constant_(param, 0)
                 elif "weight" in name:
                     nn.init.orthogonal_(param, 1.0)
+        
+        self.video_ln = nn.LayerNorm(128)
+        self.audio_ln = nn.LayerNorm(128)
+                    
         self.actor = layer_init(
             nn.Linear(128 * 2, envs.single_action_space.n), std=0.01)
         self.critic = layer_init(nn.Linear(128 * 2, 1), std=1)
@@ -346,7 +350,16 @@ class ESRAgent(nn.Module):
             )
             new_hidden_audio += [h]
 
-        new_hidden = torch.flatten(torch.cat((torch.cat(new_hidden_video), torch.cat(new_hidden_audio)), -1), 0, 1)
+        new_hidden_video = torch.cat(new_hidden_video)
+        new_hidden_audio = torch.cat(new_hidden_audio)
+
+        # Normalization
+        normalized_video_hidden = self.video_ln(new_hidden_video)
+        normalized_audio_hidden = self.video_ln(new_hidden_audio)
+
+        # Concatination
+        new_hidden = torch.flatten(
+            torch.cat((normalized_video_hidden, normalized_audio_hidden), -1), 0, 1)
         return new_hidden, (video_lstm_state, audio_lstm_state)
 
     def get_value(self, x, lstm_state, done):

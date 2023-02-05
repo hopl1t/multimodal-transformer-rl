@@ -365,16 +365,16 @@ class ESRAgent(nn.Module):
         
         # Flatten
         new_hidden = torch.flatten(weighted_concatanated_features, 0, 1)
-        return new_hidden, (video_lstm_state, audio_lstm_state)
+        return new_hidden, (video_lstm_state, audio_lstm_state), (new_hidden_video, new_hidden_audio)
 
     def get_value(self, x, lstm_state, done):
-        hidden, _ = self.get_states(x, lstm_state, done)
+        hidden, _, _ = self.get_states(x, lstm_state, done)
         return self.critic(hidden)
 
     def get_action_and_value(self, x, lstm_state, done, action=None):
-        hidden, lstm_state = self.get_states(x, lstm_state, done)
+        hidden, lstm_state, modality_features = self.get_states(x, lstm_state, done)
         logits = self.actor(hidden)
         probs = Categorical(logits=logits)
         if action is None:
             action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), lstm_state
+        return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), lstm_state, modality_features

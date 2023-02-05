@@ -357,9 +357,14 @@ class ESRAgent(nn.Module):
         normalized_video_hidden = self.video_ln(new_hidden_video)
         normalized_audio_hidden = self.video_ln(new_hidden_audio)
 
-        # Concatination
-        new_hidden = torch.flatten(
-            torch.cat((normalized_video_hidden, normalized_audio_hidden), -1), 0, 1)
+        # Feature importance coefficient
+        with torch.no_grad():
+            normalized_features_norms = torch.cat((normalized_video_hidden, normalized_audio_hidden), 1).norm(dim=-1)
+            importance = torch.softmax(normalized_features_norms, dim=-1)
+        weighted_concatanated_features = torch.cat((normalized_video_hidden * importance[:,0], normalized_audio_hidden * importance[:,1]), -1)
+        
+        # Flatten
+        new_hidden = torch.flatten(weighted_concatanated_features, 0, 1)
         return new_hidden, (video_lstm_state, audio_lstm_state)
 
     def get_value(self, x, lstm_state, done):

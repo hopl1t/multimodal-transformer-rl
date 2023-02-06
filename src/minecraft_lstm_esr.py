@@ -1,9 +1,6 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppo_atari_lstmpy
-import argparse
-import os
 import random
 import time
-from distutils.util import strtobool
 
 import gym
 import numpy as np
@@ -16,113 +13,12 @@ from torch.utils.tensorboard import SummaryWriter
 # from src.environments.casl_environment import Environment as CASLEnv
 # from environments.Minecraft.Minecraft import Minecraft
 from Minecraft import Config
-from Minecraft import Minecraft
 
-from stable_baselines3.common.atari_wrappers import (  # isort:skip
-    ClipRewardEnv,
-    EpisodicLifeEnv,
-    FireResetEnv,
-    MaxAndSkipEnv,
-    NoopResetEnv,
-)
 from agents import ESRAgent, CASLWithNormAgent
 from torch.nn.functional import cosine_similarity
+from utils import parse_args, make_env, distance_func
 
 MAX_EPISODE_LEN = 1000
-
-
-def parse_args():
-    # fmt: off
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
-        help="the name of this experiment")
-    parser.add_argument("--seed", type=int, default=1,
-        help="seed of the experiment")
-    parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="if toggled, `torch.backends.cudnn.deterministic=False`")
-    parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
-        help="if toggled, this experiment will be tracked with Weights and Biases")
-    parser.add_argument("--wandb-project-name", type=str, default="Minecraft",
-        help="the wandb's project name")
-    parser.add_argument("--wandb-entity", type=str, default=None,
-        help="the entity (team) of wandb's project")
-    parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
-        help="whether to capture videos of the agent performances (check out `videos` folder)")
-
-    # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="BreakoutNoFrameskip-v4",
-        help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=10000000,
-        help="total timesteps of the experiments")
-    parser.add_argument("--learning-rate", type=float, default=2.5e-4,
-        help="the learning rate of the optimizer")
-    parser.add_argument("--num-envs", type=int, default=1,
-        help="the number of parallel game environments")
-    parser.add_argument("--num-steps", type=int, default=128,
-        help="the number of steps to run in each environment per policy rollout")
-    parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="Toggle learning rate annealing for policy and value networks")
-    parser.add_argument("--gamma", type=float, default=0.99,
-        help="the discount factor gamma")
-    parser.add_argument("--gae-lambda", type=float, default=0.95,
-        help="the lambda for the general advantage estimation")
-    parser.add_argument("--num-minibatches", type=int, default=1,
-        help="the number of mini-batches")
-    parser.add_argument("--update-epochs", type=int, default=4,
-        help="the K epochs to update the policy")
-    parser.add_argument("--norm-adv", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="Toggles advantages normalization")
-    parser.add_argument("--clip-coef", type=float, default=0.1,
-        help="the surrogate clipping coefficient")
-    parser.add_argument("--clip-vloss", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="Toggles whether or not to use a clipped loss for the value function, as per the paper.")
-    parser.add_argument("--ent-coef", type=float, default=0.01,
-        help="coefficient of the entropy")
-    parser.add_argument("--vf-coef", type=float, default=0.5,
-        help="coefficient of the value function")
-    parser.add_argument("--max-grad-norm", type=float, default=0.5,
-        help="the maximum norm for the gradient clipping")
-    parser.add_argument("--target-kl", type=float, default=None,
-        help="the target KL divergence threshold")
-    # new args
-    parser.add_argument("--clip-reward", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="Toggles whether or not to use a clipped reward env wrapper.")
-    parser.add_argument("--conv-type", type=str, default="big",
-        help="type of conv to use")
-    parser.add_argument("--attn-type", type=str, default="",
-        help="type of attn to use")
-    parser.add_argument("--fusion-type", type=str, default="sum",
-        help="type of fusion to use")
-    parser.add_argument("--print-interval", type=int, default=1,
-        help="print every")
-    parser.add_argument("--agent-type", type=str, default="old",
-        help="old or new")
-    parser.add_argument("--similarity-func", type=str, default="cosine",
-        help="function to compute similarity between modalities")
-    parser.add_argument("--similarity-coef", type=float, default=0.0005,
-        help="coefficient of the entropy")
-    args = parser.parse_args()
-    args.batch_size = int(args.num_envs * args.num_steps)
-    args.minibatch_size = int(args.batch_size // args.num_minibatches)
-    # fmt: on
-    return args
-
-
-def make_env(env_id, seed, idx, capture_video, run_name, clip_reward):
-    def thunk():
-        env = Minecraft()
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        if capture_video:
-            if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        _ = env.reset()
-        if clip_reward:
-            env = ClipRewardEnv(env)
-        return env
-
-    return thunk
 
 
 if __name__ == "__main__":
@@ -173,7 +69,7 @@ if __name__ == "__main__":
     if args.agent_type == 'casl':
         agent = CASLWithNormAgent(envs, device).to(device)
     else:
-        agent = ESRAgent(envs, device).to(device)
+        agent = ESRAgent(envs, device, use_importance=args.use_importance).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -260,7 +156,7 @@ if __name__ == "__main__":
             ).reshape(1, -1)
             advantages = torch.zeros_like(rewards).to(device)
             lastgaelam = 0
-            for t in reversed(range(args.num_steps)):
+            for t in reversed(range(args.num_steps)): 
                 if t == args.num_steps - 1:
                     nextnonterminal = 1.0 - next_done
                     nextvalues = next_value
@@ -286,7 +182,6 @@ if __name__ == "__main__":
         envinds = np.arange(args.num_envs)
         flatinds = np.arange(args.batch_size).reshape(args.num_steps, args.num_envs)
         clipfracs = []
-        previous_modality_features = None
         for epoch in range(args.update_epochs):
             np.random.shuffle(envinds)
             for start in range(0, args.num_envs, envsperbatch):
@@ -336,35 +231,25 @@ if __name__ == "__main__":
 
                 entropy_loss = entropy.mean()
                 
-                # similarity and temporal discrimination loss
-                if args.agent_type == 'casl':
-                    loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
-                else:
-                    if args.similarity_func == 'cosine':
-                        similarity_loss = cosine_similarity(
-                            modality_features[0], modality_features[1], dim=-1).sum() / modality_features[0].shape[-1]
-                        if previous_modality_features:
-                            temporal_disc_loss = (cosine_similarity(
-                                modality_features[0], previous_modality_features[0], dim=-1).sum() + cosine_similarity(
-                                modality_features[1], previous_modality_features[1], dim=-1).sum()) / modality_features[0].shape[-1]
-                    elif args.similarity_func == 'euclidean':
-                        similarity_loss = torch.norm(modality_features[0] - modality_features[1], dim=-1).sum() / modality_features[0].shape[-1]
-                        if previous_modality_features:
-                            temporal_disc_loss = (torch.norm(
-                                modality_features[0] - previous_modality_features[0], dim=-1).sum() + torch.norm(
-                                modality_features[1] - previous_modality_features[1], dim=-1).sum()) / modality_features[0].shape[-1]
-                    elif args.similarity_func == 'kl':
-                        similarity_loss = 0.5 * (torch.nn.KLDivLoss()(
-                            modality_features[0], modality_features[1]) + torch.nn.KLDivLoss()(modality_features[1], modality_features[0]))
-                        if previous_modality_features:
-                            temporal_disc_loss = 0.5 * (torch.nn.KLDivLoss()(modality_features[0], previous_modality_features[0]) + torch.nn.KLDivLoss()(
-                                modality_features[1], previous_modality_features[1]))
-                    if not previous_modality_features:
-                        temporal_disc_loss = torch.tensor(0, dtype=torch.float32)
-                    previous_modality_features = (modality_features[0].clone().detach(), modality_features[1].clone().detach())
-                    
-                    loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + args.similarity_coef * similarity_loss - args.similarity_coef * temporal_disc_loss
+                # temporal discrimination loss
+                if args.use_similarity and not (args.agent_type == 'casl'):
+                    temporal_disc_loss = torch.zeros((), dtype=torch.float32).to(device)
+                    _, _, (video_features, audio_features) = agent.get_states(b_obs, initial_lstm_state, b_dones)
+                    for idx, (video_feature, audio_feature) in enumerate(zip(video_features, audio_features)):
+                        if idx == 0:
+                            previous_video_feature = video_feature
+                            previous_audio_feature = audio_feature
+                            continue
+                        temporal_disc_loss += 0.5 * distance_func(video_feature, previous_video_feature, args.similarity_func) + 0.5 * distance_func(audio_feature, previous_audio_feature, args.similarity_func)
+                        previous_video_feature = video_feature
+                        previous_audio_feature = audio_feature
+                    temporal_disc_loss /= b_obs.shape[0]
 
+                    similarity_loss = distance_func(modality_features[0], modality_features[1], args.similarity_func)
+                    loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + args.similarity_coef * similarity_loss - args.similarity_coef * temporal_disc_loss
+                else:
+                    loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                
                 optimizer.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)

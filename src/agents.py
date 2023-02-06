@@ -293,10 +293,11 @@ class OldAgent(nn.Module):
 
 
 class ESRAgent(nn.Module):
-    def __init__(self, envs, device, conv_type='big'):
+    def __init__(self, envs, device, conv_type='big', use_importance=True):
         super().__init__()
         print(
             f"🤖ESR agent🤖")
+        self.use_importance = use_importance
         if conv_type == 'big':
             self.feature_size = 512
         else:
@@ -332,10 +333,10 @@ class ESRAgent(nn.Module):
 
         # LSTM logic
         batch_size = video_lstm_state[0].shape[1]
+        done = done.reshape((-1, batch_size))
         # LSTM video
         video_features = video_features.reshape(
             (-1, batch_size, self.video_lstm.input_size))
-        done = done.reshape((-1, batch_size))
         new_hidden_video = []
         for h, d in zip(video_features, done):
             h, video_lstm_state = self.video_lstm(
@@ -346,10 +347,10 @@ class ESRAgent(nn.Module):
                 ),
             )
             new_hidden_video += [h]       
+        new_hidden_video = torch.flatten(torch.cat(new_hidden_video), 0, 1)
         # LSTM audio
         audio_features = audio_features.reshape(
             (-1, batch_size, self.audio_lstm.input_size))
-        done = done.reshape((-1, batch_size))
         new_hidden_audio = []
         for h, d in zip(audio_features, done):
             h, audio_lstm_state = self.audio_lstm(
@@ -360,23 +361,23 @@ class ESRAgent(nn.Module):
                 ),
             )
             new_hidden_audio += [h]
-
-        new_hidden_video = torch.cat(new_hidden_video)
-        new_hidden_audio = torch.cat(new_hidden_audio)
+        new_hidden_audio = torch.flatten(torch.cat(new_hidden_audio), 0, 1)
 
         # Normalization
         normalized_video_hidden = self.video_ln(new_hidden_video)
-        normalized_audio_hidden = self.video_ln(new_hidden_audio)
+        normalized_audio_hidden = self.audio_ln(new_hidden_audio)
 
         # Feature importance coefficient
-        with torch.no_grad():
-            normalized_features_norms = torch.cat((normalized_video_hidden, normalized_audio_hidden), 1).norm(dim=-1)
-            importance = torch.softmax(normalized_features_norms, dim=-1)
-        weighted_concatanated_features = torch.cat((normalized_video_hidden * importance[:,0], normalized_audio_hidden * importance[:,1]), -1)
-        
-        # Flatten
-        new_hidden = torch.flatten(weighted_concatanated_features, 0, 1)
-        return new_hidden, (video_lstm_state, audio_lstm_state), (new_hidden_video, new_hidden_audio)
+        if self.use_importance:
+            with torch.no_grad():
+                normalized_features_norms = torch.cat((normalized_video_hidden, normalized_audio_hidden), 0).norm(dim=-1)
+                importance = torch.softmax(normalized_features_norms, dim=-1)
+            weighted_concatanated_features = torch.cat((normalized_video_hidden * importance[0:len(
+                importance)//2], normalized_audio_hidden * importance[len(importance)//2:]), -1)
+        else:
+            weighted_concatanated_features = torch.cat((normalized_video_hidden, normalized_audio_hidden), -1)
+
+        return weighted_concatanated_features, (video_lstm_state, audio_lstm_state), (new_hidden_video, new_hidden_audio)
 
     def get_value(self, x, lstm_state, done):
         hidden, _, _ = self.get_states(x, lstm_state, done)
@@ -429,10 +430,10 @@ class CASLWithNormAgent(nn.Module):
 
         # LSTM logic
         batch_size = video_lstm_state[0].shape[1]
+        done = done.reshape((-1, batch_size))
         # LSTM video
         video_features = video_features.reshape(
             (-1, batch_size, self.video_lstm.input_size))
-        done = done.reshape((-1, batch_size))
         new_hidden_video = []
         for h, d in zip(video_features, done):
             h, video_lstm_state = self.video_lstm(
@@ -443,10 +444,10 @@ class CASLWithNormAgent(nn.Module):
                 ),
             )
             new_hidden_video += [h]
+        new_hidden_video = torch.flatten(torch.cat(new_hidden_video), 0, 1)
         # LSTM audio
         audio_features = audio_features.reshape(
             (-1, batch_size, self.audio_lstm.input_size))
-        done = done.reshape((-1, batch_size))
         new_hidden_audio = []
         for h, d in zip(audio_features, done):
             h, audio_lstm_state = self.audio_lstm(
@@ -457,13 +458,11 @@ class CASLWithNormAgent(nn.Module):
                 ),
             )
             new_hidden_audio += [h]
-
-        new_hidden_video = torch.flatten(torch.cat(new_hidden_video), 0, 1)
         new_hidden_audio = torch.flatten(torch.cat(new_hidden_audio), 0, 1)
-        
+
         # Normalization
         normalized_video_hidden = self.video_ln(new_hidden_video)
-        normalized_audio_hidden = self.video_ln(new_hidden_audio)
+        normalized_audio_hidden = self.audio_ln(new_hidden_audio)
 
         # Attention
         attn_video_features, attn_audio_features, attn_weights = self.attn(

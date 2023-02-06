@@ -25,7 +25,7 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
     MaxAndSkipEnv,
     NoopResetEnv,
 )
-from agents import ESRAgent
+from agents import ESRAgent, CASLWithNormAgent
 from torch.nn.functional import cosine_similarity
 
 MAX_EPISODE_LEN = 1000
@@ -101,7 +101,7 @@ def parse_args():
         help="old or new")
     parser.add_argument("--similarity-func", type=str, default="cosine",
         help="function to compute similarity between modalities")
-    parser.add_argument("--similarity-coef", type=float, default=0.01,
+    parser.add_argument("--similarity-coef", type=float, default=0.0005,
         help="coefficient of the entropy")
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
@@ -170,7 +170,10 @@ if __name__ == "__main__":
 
     envs = make_env(args.env_id, args.seed, 0, args.capture_video, run_name, args.clip_reward)()
 
-    agent = ESRAgent(envs, device).to(device)
+    if args.agent_type == 'casl':
+        agent = CASLWithNormAgent(envs, device).to(device)
+    else:
+        agent = ESRAgent(envs, device).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -331,34 +334,36 @@ if __name__ == "__main__":
                 else:
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
-                # similarity and temporal discrimination loss
-                if args.similarity_func == 'cosine':
-                    similarity_loss = cosine_similarity(
-                        modality_features[0], modality_features[1], dim=-1).sum() / modality_features[0].shape[-1]
-                    if previous_modality_features:
-                        temporal_disc_loss = (cosine_similarity(
-                            modality_features[0], previous_modality_features[0], dim=-1).sum() + cosine_similarity(
-                            modality_features[1], previous_modality_features[1], dim=-1).sum()) / modality_features[0].shape[-1]
-                elif args.similarity_func == 'euclidean':
-                    similarity_loss = torch.norm(modality_features[0] - modality_features[1], dim=-1).sum() / modality_features[0].shape[-1]
-                    if previous_modality_features:
-                        temporal_disc_loss = (torch.norm(
-                            modality_features[0] - previous_modality_features[0], dim=-1).sum() + torch.norm(
-                            modality_features[1] - previous_modality_features[1], dim=-1).sum()) / modality_features[0].shape[-1]
-                elif args.similarity_func == 'kl':
-                    similarity_loss = 0.5 * (torch.nn.KLDivLoss()(
-                        modality_features[0], modality_features[1]) + torch.nn.KLDivLoss()(modality_features[1], modality_features[0]))
-                    if previous_modality_features:
-                        temporal_disc_loss = 0.5 * (torch.nn.KLDivLoss()(modality_features[0], previous_modality_features[0]) + torch.nn.KLDivLoss()(
-                            modality_features[1], previous_modality_features[1]))
-                if not previous_modality_features:
-                    temporal_disc_loss = torch.tensor(0, dtype=torch.float32)
-                previous_modality_features = (modality_features[0].clone().detach(), modality_features[1].clone().detach())
-                # temporal discrimination loss
-
-
                 entropy_loss = entropy.mean()
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + args.similarity_coef * similarity_loss - args.similarity_coef * temporal_disc_loss
+                
+                # similarity and temporal discrimination loss
+                if args.agent_type == 'casl':
+                    loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                else:
+                    if args.similarity_func == 'cosine':
+                        similarity_loss = cosine_similarity(
+                            modality_features[0], modality_features[1], dim=-1).sum() / modality_features[0].shape[-1]
+                        if previous_modality_features:
+                            temporal_disc_loss = (cosine_similarity(
+                                modality_features[0], previous_modality_features[0], dim=-1).sum() + cosine_similarity(
+                                modality_features[1], previous_modality_features[1], dim=-1).sum()) / modality_features[0].shape[-1]
+                    elif args.similarity_func == 'euclidean':
+                        similarity_loss = torch.norm(modality_features[0] - modality_features[1], dim=-1).sum() / modality_features[0].shape[-1]
+                        if previous_modality_features:
+                            temporal_disc_loss = (torch.norm(
+                                modality_features[0] - previous_modality_features[0], dim=-1).sum() + torch.norm(
+                                modality_features[1] - previous_modality_features[1], dim=-1).sum()) / modality_features[0].shape[-1]
+                    elif args.similarity_func == 'kl':
+                        similarity_loss = 0.5 * (torch.nn.KLDivLoss()(
+                            modality_features[0], modality_features[1]) + torch.nn.KLDivLoss()(modality_features[1], modality_features[0]))
+                        if previous_modality_features:
+                            temporal_disc_loss = 0.5 * (torch.nn.KLDivLoss()(modality_features[0], previous_modality_features[0]) + torch.nn.KLDivLoss()(
+                                modality_features[1], previous_modality_features[1]))
+                    if not previous_modality_features:
+                        temporal_disc_loss = torch.tensor(0, dtype=torch.float32)
+                    previous_modality_features = (modality_features[0].clone().detach(), modality_features[1].clone().detach())
+                    
+                    loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + args.similarity_coef * similarity_loss - args.similarity_coef * temporal_disc_loss
 
                 optimizer.zero_grad()
                 loss.backward()

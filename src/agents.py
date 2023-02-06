@@ -62,18 +62,29 @@ def conv_factory(size='big'):
 
 
 class CaslAttention(nn.Module):
-    def __init__(self, feature_input_size):
+    def __init__(self, feature_input_size, joint_lstm=True):
         super().__init__()
+        self.joint_lstm = joint_lstm
         self.audio_fc = nn.Linear(feature_input_size, 32)
         self.video_fc = nn.Linear(feature_input_size, 32)
-        self.state_fc = nn.Linear(128, 32)
+        if self.joint_lstm:
+            self.state_fc = nn.Linear(128, 32)
+        else:
+            self.video_state_fc = nn.Linear(128, 32)
+            self.audio_state_fc = nn.Linear(128, 32)
         self.attention = nn.Linear(32, 2)
     
     def forward(self, video_features, audio_features, lstm_state):
         attn_video_features = self.video_fc(video_features)
         attn_audio_features = self.audio_fc(audio_features)
         # h_n as in casl. See https://pytorch.org/docs/stable/generated/torch.nn.LSTM.html
-        attn_lstm_state = self.state_fc(lstm_state[0])
+        if self.joint_lstm:
+            attn_lstm_state = self.state_fc(lstm_state[0])
+        else:
+            attn_video_lstm_state = self.video_state_fc(lstm_state[0][0])
+            attn_audio_lstm_state = self.audio_state_fc(lstm_state[1][0])
+            attn_lstm_state = attn_video_lstm_state + attn_audio_lstm_state
+
         activated = torch.tanh(attn_video_features + attn_audio_features + attn_lstm_state)
         attention_weights = torch.softmax(self.attention(activated).squeeze(0), axis=-1)
         video_features = attention_weights[:, 0].unsqueeze(1) * video_features
@@ -373,6 +384,101 @@ class ESRAgent(nn.Module):
 
     def get_action_and_value(self, x, lstm_state, done, action=None):
         hidden, lstm_state, modality_features = self.get_states(x, lstm_state, done)
+        logits = self.actor(hidden)
+        probs = Categorical(logits=logits)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), lstm_state, modality_features
+
+
+class CASLWithNormAgent(nn.Module):
+    def __init__(self, envs, device):
+        super().__init__()
+        print(f"🤖CaSL with seperate LSTM and layer norm agent🤖")
+        self.feature_size = 512
+
+        self.video_net = conv_factory('big')
+        self.audio_net = conv_factory('big')
+
+        self.video_lstm = nn.LSTM(self.feature_size, 128)
+        self.audio_lstm = nn.LSTM(self.feature_size, 128)
+        for lstm in (self.video_lstm, self.audio_lstm):
+            for name, param in lstm.named_parameters():
+                if "bias" in name:
+                    nn.init.constant_(param, 0)
+                elif "weight" in name:
+                    nn.init.orthogonal_(param, 1.0)
+
+        self.video_ln = nn.LayerNorm(128)
+        self.audio_ln = nn.LayerNorm(128)
+
+        self.attn = CaslAttention(128, joint_lstm=False)
+
+        self.actor = layer_init(
+            nn.Linear(128 * 2, envs.single_action_space.n), std=0.01)
+        self.critic = layer_init(nn.Linear(128 * 2, 1), std=1)
+        self.device = device
+
+    def get_states(self, x, lstm_states, done):
+        video_lstm_state = lstm_states[0]
+        audio_lstm_state = lstm_states[1]
+        video_features = self.video_net(torch.index_select(
+            x, 1, torch.tensor([0]).to(self.device)))
+        audio_features = self.audio_net(torch.index_select(
+            x, 1, torch.tensor([1]).to(self.device)))
+
+        # LSTM logic
+        batch_size = video_lstm_state[0].shape[1]
+        # LSTM video
+        video_features = video_features.reshape(
+            (-1, batch_size, self.video_lstm.input_size))
+        done = done.reshape((-1, batch_size))
+        new_hidden_video = []
+        for h, d in zip(video_features, done):
+            h, video_lstm_state = self.video_lstm(
+                h.unsqueeze(0),
+                (
+                    (1.0 - d).view(1, -1, 1) * video_lstm_state[0],
+                    (1.0 - d).view(1, -1, 1) * video_lstm_state[1],
+                ),
+            )
+            new_hidden_video += [h]
+        # LSTM audio
+        audio_features = audio_features.reshape(
+            (-1, batch_size, self.audio_lstm.input_size))
+        done = done.reshape((-1, batch_size))
+        new_hidden_audio = []
+        for h, d in zip(audio_features, done):
+            h, audio_lstm_state = self.audio_lstm(
+                h.unsqueeze(0),
+                (
+                    (1.0 - d).view(1, -1, 1) * audio_lstm_state[0],
+                    (1.0 - d).view(1, -1, 1) * audio_lstm_state[1],
+                ),
+            )
+            new_hidden_audio += [h]
+
+        new_hidden_video = torch.flatten(torch.cat(new_hidden_video), 0, 1)
+        new_hidden_audio = torch.flatten(torch.cat(new_hidden_audio), 0, 1)
+        
+        # Normalization
+        normalized_video_hidden = self.video_ln(new_hidden_video)
+        normalized_audio_hidden = self.video_ln(new_hidden_audio)
+
+        # Attention
+        attn_video_features, attn_audio_features, attn_weights = self.attn(
+            normalized_video_hidden, normalized_audio_hidden, lstm_states)
+        weighted_concatanated_features = torch.cat((attn_video_features, attn_audio_features), -1)
+
+        return weighted_concatanated_features, (video_lstm_state, audio_lstm_state), (new_hidden_video, new_hidden_audio)
+
+    def get_value(self, x, lstm_state, done):
+        hidden, _, _ = self.get_states(x, lstm_state, done)
+        return self.critic(hidden)
+
+    def get_action_and_value(self, x, lstm_state, done, action=None):
+        hidden, lstm_state, modality_features = self.get_states(
+            x, lstm_state, done)
         logits = self.actor(hidden)
         probs = Categorical(logits=logits)
         if action is None:

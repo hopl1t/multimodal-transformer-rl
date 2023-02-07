@@ -86,6 +86,8 @@ def parse_args():
         help="function to compute similarity between modalities")
     parser.add_argument("--similarity-coef", type=float, default=0.005,
         help="coefficient of the entropy")
+    parser.add_argument("--alignment-coef", type=float, default=0.001,
+        help="coefficient of the entropy")
     parser.add_argument("--use-importance", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="Toggles whether or not to use importance in esr.")
     parser.add_argument("--use-similarity", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,

@@ -88,10 +88,12 @@ def parse_args():
         help="coefficient of the entropy")
     parser.add_argument("--alignment-coef", type=float, default=0.001,
         help="coefficient of the entropy")
-    parser.add_argument("--use-importance", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
+    parser.add_argument("--use-importance", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="Toggles whether or not to use importance in esr.")
-    parser.add_argument("--use-similarity", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
+    parser.add_argument("--use-similarity", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="Toggles whether or not to use similarity in esr.")
+    parser.add_argument("--use-alignment", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
+        help="Toggles whether or not to use alignment in esr.")
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)

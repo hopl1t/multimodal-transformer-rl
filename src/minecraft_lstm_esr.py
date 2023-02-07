@@ -14,12 +14,18 @@ from torch.utils.tensorboard import SummaryWriter
 # from environments.Minecraft.Minecraft import Minecraft
 from Minecraft import Config
 
-from agents import ESRAgent, CASLWithNormAgent
+from agents import ESRAgent, CASLWithNormAgent, ESRSumAgent
 from torch.nn.functional import cosine_similarity
 from utils import parse_args, make_env, distance_func
 
 MAX_EPISODE_LEN = 1000
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+ALIGNMENT_VECTOR1 = torch.cat(
+    (torch.ones(64), torch.zeros(64))).to(torch.device(device))
+ALIGNMENT_VECTOR2 = torch.cat(
+    (torch.zeros(64), torch.ones(64))).to(torch.device(device))
 
 if __name__ == "__main__":
     args = parse_args()
@@ -58,16 +64,14 @@ if __name__ == "__main__":
     else:
         print("### USING CPU ###")
 
-    # env setup
-    # envs = gym.vector.SyncVectorEnv(
-    #     [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name) for i in range(args.num_envs)]
-    # )
-    # assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
-
     envs = make_env(args.env_id, args.seed, 0, args.capture_video, run_name, args.clip_reward)()
 
     if args.agent_type == 'casl':
         agent = CASLWithNormAgent(envs, device).to(device)
+    elif args.agent_type == 'alignment':
+        agent = ESRSumAgent(
+            envs, device, use_importance=args.use_importance).to(device)
+        print("# USING ESR WITH ALIGNMENT #")
     else:
         agent = ESRAgent(envs, device, use_importance=args.use_importance).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
@@ -247,6 +251,10 @@ if __name__ == "__main__":
 
                     similarity_loss = distance_func(modality_features[0], modality_features[1], args.similarity_func)
                     loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + args.similarity_coef * similarity_loss - args.similarity_coef * temporal_disc_loss
+                elif args.use_alignment:
+                    alignment_loss = cosine_similarity(modality_features[0], ALIGNMENT_VECTOR1, dim=-1).sum(
+                    ) + cosine_similarity(modality_features[1], ALIGNMENT_VECTOR2, dim=-1).sum()
+                    loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + alignment_loss * args.alignment_coef
                 else:
                     loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
                 

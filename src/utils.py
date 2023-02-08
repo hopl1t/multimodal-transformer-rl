@@ -35,7 +35,7 @@ def parse_args():
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="BreakoutNoFrameskip-v4",
+    parser.add_argument("--env-id", type=str, default="minecraft",  # BreakoutNoFrameskip-v4
         help="the id of the environment")
     parser.add_argument("--total-timesteps", type=int, default=10000000,
         help="total timesteps of the experiments")
@@ -45,7 +45,7 @@ def parse_args():
         help="the number of parallel game environments")
     parser.add_argument("--num-steps", type=int, default=128,
         help="the number of steps to run in each environment per policy rollout")
-    parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
+    parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="Toggle learning rate annealing for policy and value networks")
     parser.add_argument("--gamma", type=float, default=0.99,
         help="the discount factor gamma")
@@ -70,7 +70,7 @@ def parse_args():
     parser.add_argument("--target-kl", type=float, default=None,
         help="the target KL divergence threshold")
     # new args
-    parser.add_argument("--clip-reward", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
+    parser.add_argument("--clip-reward", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="Toggles whether or not to use a clipped reward env wrapper.")
     parser.add_argument("--conv-type", type=str, default="big",
         help="type of conv to use")
@@ -78,22 +78,14 @@ def parse_args():
         help="type of attn to use")
     parser.add_argument("--fusion-type", type=str, default="sum",
         help="type of fusion to use")
-    parser.add_argument("--print-interval", type=int, default=1,
+    parser.add_argument("--print-interval", type=int, default=1000,
         help="print every")
-    parser.add_argument("--agent-type", type=str, default="new",
-        help="old or new")
-    parser.add_argument("--similarity-func", type=str, default="euclidean",
-        help="function to compute similarity between modalities")
-    parser.add_argument("--similarity-coef", type=float, default=0.005,
+    parser.add_argument("--alignment-coef", type=float, default=0.00025,
         help="coefficient of the entropy")
-    parser.add_argument("--alignment-coef", type=float, default=0.001,
-        help="coefficient of the entropy")
-    parser.add_argument("--use-importance", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
-        help="Toggles whether or not to use importance in esr.")
-    parser.add_argument("--use-similarity", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
-        help="Toggles whether or not to use similarity in esr.")
     parser.add_argument("--use-alignment", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="Toggles whether or not to use alignment in esr.")
+    parser.add_argument("--use-attention", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
+        help="Toggles whether or not to use attention in esr.")
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)

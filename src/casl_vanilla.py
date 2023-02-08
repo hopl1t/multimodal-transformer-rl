@@ -25,20 +25,90 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
     MaxAndSkipEnv,
     NoopResetEnv,
 )
-from agents import AlignmentAgent
+from agents import MinecraftAgent
 from utils import parse_args, make_env
-from torch.nn.functional import cosine_similarity
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-if device == torch.device('cuda'):
-    print("### USING CUDA ###")
-else:
-    print("### USING CPU ###")
 
 MAX_EPISODE_LEN = 1000
 
-ALIGNMENT_VECTOR1 = torch.cat((torch.ones(256), torch.zeros(256))).to(torch.device(device))
-ALIGNMENT_VECTOR2 = torch.cat((torch.zeros(256), torch.ones(256))).to(torch.device(device))
+
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+    torch.nn.init.orthogonal_(layer.weight, std)
+    torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
+
+
+class Agent(nn.Module):
+    def __init__(self, envs):
+        super().__init__()
+        self.video_net = nn.Sequential(
+            layer_init(
+                nn.Conv2d(1, 32, 8, stride=4)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(64, 64, 3, stride=1)),
+            nn.ReLU(),
+            nn.Flatten(),
+            layer_init(nn.Linear(64 * 7 * 7, 512)),
+            nn.ReLU(),
+        )
+        self.audio_net = nn.Sequential(
+            layer_init(
+                nn.Conv2d(1, 32, 8, stride=4)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(64, 64, 3, stride=1)),
+            nn.ReLU(),
+            nn.Flatten(),
+            layer_init(nn.Linear(64 * 7 * 7, 512)),
+            nn.ReLU(),
+        )
+        self.lstm = nn.LSTM(512, 128)
+        for name, param in self.lstm.named_parameters():
+            if "bias" in name:
+                nn.init.constant_(param, 0)
+            elif "weight" in name:
+                nn.init.orthogonal_(param, 1.0)
+        self.actor = layer_init(nn.Linear(128, envs.single_action_space.n), std=0.01)
+        self.critic = layer_init(nn.Linear(128, 1), std=1)
+
+    def get_states(self, x, lstm_state, done):
+        video_hidden = self.video_net(torch.index_select(x,1,torch.tensor([0]).to(device)).to(device) / 255.0)
+        audio_hidden = self.audio_net(torch.index_select(x,1,torch.tensor([1]).to(device)).to(device) / 255.0)
+        # video_hidden = self.video_net(torch.index_select(x,1,torch.tensor([0]).to(device)).to(device))
+        # audio_hidden = self.audio_net(torch.index_select(x,1,torch.tensor([1]).to(device)).to(device))
+        hidden = video_hidden + audio_hidden
+
+        # LSTM logic
+        batch_size = lstm_state[0].shape[1]
+        hidden = hidden.reshape((-1, batch_size, self.lstm.input_size))
+        done = done.reshape((-1, batch_size))
+        new_hidden = []
+        for h, d in zip(hidden, done):
+            h, lstm_state = self.lstm(
+                h.unsqueeze(0),
+                (
+                    (1.0 - d).view(1, -1, 1) * lstm_state[0],
+                    (1.0 - d).view(1, -1, 1) * lstm_state[1],
+                ),
+            )
+            new_hidden += [h]
+        new_hidden = torch.flatten(torch.cat(new_hidden), 0, 1)
+        return new_hidden, lstm_state
+
+    def get_value(self, x, lstm_state, done):
+        hidden, _ = self.get_states(x, lstm_state, done)
+        return self.critic(hidden)
+
+    def get_action_and_value(self, x, lstm_state, done, action=None):
+        hidden, lstm_state = self.get_states(x, lstm_state, done)
+        logits = self.actor(hidden)
+        probs = Categorical(logits=logits)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), lstm_state
+
 
 if __name__ == "__main__":
     args = parse_args()
@@ -71,7 +141,11 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
-
+    device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    if device == torch.device('cuda'):
+        print("### USING CUDA ###")
+    else:
+        print("### USING CPU ###")
 
     # env setup
     # envs = gym.vector.SyncVectorEnv(
@@ -81,8 +155,9 @@ if __name__ == "__main__":
 
     envs = make_env(args.env_id, args.seed, 0, args.capture_video, run_name, args.clip_reward)()
 
-    print("### USING NEW AGENT ###")
-    agent = AlignmentAgent(envs, device, args.conv_type).to(device)
+    print("### USING MINECRAFT CASL AGENT ###")
+    agent = MinecraftAgent(envs, device, args.conv_type, attn_type='casl', fusion_type=args.fusion_type).to(device)
+
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -122,7 +197,7 @@ if __name__ == "__main__":
 
             # ALGO LOGIC: action logic
             with torch.no_grad():
-                action, logprob, _, value, next_lstm_state, _ = agent.get_action_and_value(next_obs, next_lstm_state, next_done)
+                action, logprob, _, value, next_lstm_state = agent.get_action_and_value(next_obs, next_lstm_state, next_done)
                 values[step] = value.flatten()
             actions[step] = action
             logprobs[step] = logprob
@@ -200,7 +275,7 @@ if __name__ == "__main__":
                 mbenvinds = envinds[start:end]
                 mb_inds = flatinds[:, mbenvinds].ravel()  # be really careful about the index
 
-                _, newlogprob, entropy, newvalue, _, (normalized_video_hidden, normalized_audio_hidden) = agent.get_action_and_value(
+                _, newlogprob, entropy, newvalue, _ = agent.get_action_and_value(
                     b_obs[mb_inds],
                     (initial_lstm_state[0][:, mbenvinds], initial_lstm_state[1][:, mbenvinds]),
                     b_dones[mb_inds],
@@ -240,12 +315,7 @@ if __name__ == "__main__":
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
                 entropy_loss = entropy.mean()
-
-                # Alignment loss
-                alignment_loss = cosine_similarity(normalized_video_hidden, ALIGNMENT_VECTOR1, dim=-1).sum() + cosine_similarity(normalized_audio_hidden, ALIGNMENT_VECTOR2, dim=-1).sum() 
-
-                loss = pg_loss - args.ent_coef * entropy_loss + \
-                    v_loss * args.vf_coef + alignment_loss * args.alignment_coef
+                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
 
                 optimizer.zero_grad()
                 loss.backward()

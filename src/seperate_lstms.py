@@ -14,7 +14,7 @@ from torch.utils.tensorboard import SummaryWriter
 # from environments.Minecraft.Minecraft import Minecraft
 from Minecraft import Config
 
-from agents import ESRAgent, CASLWithNormAgent, ESRSumAgent
+from agents import SeperateLstmSumAlignableAgent
 from torch.nn.functional import cosine_similarity
 from utils import parse_args, make_env, distance_func
 
@@ -22,10 +22,8 @@ MAX_EPISODE_LEN = 1000
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-ALIGNMENT_VECTOR1 = torch.cat(
-    (torch.ones(64), torch.zeros(64))).to(torch.device(device))
-ALIGNMENT_VECTOR2 = torch.cat(
-    (torch.zeros(64), torch.ones(64))).to(torch.device(device))
+ALIGNMENT_VECTOR1 = torch.cat((torch.ones(1), torch.zeros(127))).to(torch.device(device))
+ALIGNMENT_VECTOR2 = torch.cat((torch.ones(1) * -1, torch.zeros(127))).to(torch.device(device))
 
 if __name__ == "__main__":
     args = parse_args()
@@ -33,6 +31,8 @@ if __name__ == "__main__":
         print('### 🔊 USING AUDIO 🔊 ###')
     if args.clip_reward:
         print('### ✂️ CLIPPING REWARDS ✂️ ###')
+    if args.use_alignment:
+        print('### Using alignment ###')
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     if args.track:
         import wandb
@@ -66,14 +66,8 @@ if __name__ == "__main__":
 
     envs = make_env(args.env_id, args.seed, 0, args.capture_video, run_name, args.clip_reward)()
 
-    if args.agent_type == 'casl':
-        agent = CASLWithNormAgent(envs, device).to(device)
-    elif args.agent_type == 'alignment':
-        agent = ESRSumAgent(
-            envs, device, use_importance=args.use_importance).to(device)
-        print("# USING ESR WITH ALIGNMENT #")
-    else:
-        agent = ESRAgent(envs, device, use_importance=args.use_importance).to(device)
+    agent = SeperateLstmSumAlignableAgent(envs, device, args.use_attention).to(device)
+    print("# USING SeperateLstmSumAlignableAgent Agent #")
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -236,25 +230,10 @@ if __name__ == "__main__":
                 entropy_loss = entropy.mean()
                 
                 # temporal discrimination loss
-                if args.use_similarity and not (args.agent_type == 'casl'):
-                    temporal_disc_loss = torch.zeros((), dtype=torch.float32).to(device)
-                    _, _, (video_features, audio_features) = agent.get_states(b_obs, initial_lstm_state, b_dones)
-                    for idx, (video_feature, audio_feature) in enumerate(zip(video_features, audio_features)):
-                        if idx == 0:
-                            previous_video_feature = video_feature
-                            previous_audio_feature = audio_feature
-                            continue
-                        temporal_disc_loss += 0.5 * distance_func(video_feature, previous_video_feature, args.similarity_func) + 0.5 * distance_func(audio_feature, previous_audio_feature, args.similarity_func)
-                        previous_video_feature = video_feature
-                        previous_audio_feature = audio_feature
-                    temporal_disc_loss /= b_obs.shape[0]
-
-                    similarity_loss = distance_func(modality_features[0], modality_features[1], args.similarity_func)
-                    loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + args.similarity_coef * similarity_loss - args.similarity_coef * temporal_disc_loss
-                elif args.use_alignment:
+                if args.use_alignment:
                     alignment_loss = cosine_similarity(modality_features[0], ALIGNMENT_VECTOR1, dim=-1).sum(
                     ) + cosine_similarity(modality_features[1], ALIGNMENT_VECTOR2, dim=-1).sum()
-                    loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + alignment_loss * args.alignment_coef
+                    loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef - alignment_loss * args.alignment_coef
                 else:
                     loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
                 

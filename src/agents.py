@@ -234,7 +234,7 @@ class GymAgent(nn.Module):
 
 
 class AlignableCaslAgent(nn.Module):
-    def __init__(self, envs, device, conv_type='big'):
+    def __init__(self, envs, device, norm_type='layer', conv_type='big'):
         super().__init__()
         print(f"🤖Orthogonaly aligned agent🤖")
         if conv_type == 'big':
@@ -242,14 +242,25 @@ class AlignableCaslAgent(nn.Module):
         else:
             self.feature_size = 256
 
+        self.norm_type = norm_type
         self.lstm_size = self.feature_size
         self.attn = CaslAttention(self.feature_size)
 
         self.video_net = conv_factory(conv_type)
         self.audio_net = conv_factory(conv_type)
 
-        self.video_ln = nn.LayerNorm(self.feature_size)
-        self.audio_ln = nn.LayerNorm(self.feature_size)
+        if self.norm_type == 'layer':
+            self.video_norm = nn.LayerNorm(self.feature_size)
+            self.audio_norm = nn.LayerNorm(self.feature_size)
+            print("## USING LAYER NORM ##")
+        elif self.norm_type == 'batch':
+            print("## USING BATCH NORM ##")
+            self.video_norm = nn.BatchNorm1d(self.feature_size)
+            self.audio_norm = nn.BatchNorm1d(self.feature_size)
+        elif self.norm_type == 'instance':
+            print("## USING INSTANCE NORM ##")
+            self.video_norm = nn.InstanceNorm1d(self.feature_size)
+            self.audio_norm = nn.InstanceNorm1d(self.feature_size)
 
         self.lstm = nn.LSTM(self.lstm_size, 128)
         for name, param in self.lstm.named_parameters():
@@ -269,12 +280,19 @@ class AlignableCaslAgent(nn.Module):
             x, 1, torch.tensor([1]).to(self.device)))
         
         # Normalization
-        normalized_video_hidden = self.video_ln(video_features)
-        normalized_audio_hidden = self.audio_ln(audio_features)
+        if self.norm_type in ['layer', 'instance']:
+            video_features = self.video_norm(video_features)
+            audio_features = self.audio_norm(audio_features)
+        elif self.norm_type == 'batch':
+            if video_features.shape[0] == 1:
+                self.eval()
+            video_features = self.video_norm(video_features)
+            audio_features = self.audio_norm(audio_features)
+            self.train()
 
         # Cross attention
         attn_video_features, attn_audio_features, attn_weights = self.attn(
-            normalized_video_hidden, normalized_audio_hidden, lstm_state)
+            video_features, audio_features, lstm_state)
 
         # Modality fusion
         fused_features = attn_video_features + attn_audio_features
@@ -295,7 +313,7 @@ class AlignableCaslAgent(nn.Module):
             )
             new_hidden += [h]
         new_hidden = torch.flatten(torch.cat(new_hidden), 0, 1)
-        return new_hidden, lstm_state, (normalized_video_hidden, normalized_audio_hidden)
+        return new_hidden, lstm_state, (video_features, audio_features)
 
     def get_value(self, x, lstm_state, done):
         hidden, _, _ = self.get_states(x, lstm_state, done)

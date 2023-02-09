@@ -78,6 +78,8 @@ def parse_args():
         help="type of attn to use")
     parser.add_argument("--fusion-type", type=str, default="sum",
         help="type of fusion to use")
+    parser.add_argument("--norm-type", type=str, default="layer",
+        help="Either layer, batch, instance or none")
     parser.add_argument("--print-interval", type=int, default=1000,
         help="print every")
     parser.add_argument("--alignment-coef", type=float, default=0.00025,

@@ -38,7 +38,7 @@ else:
 MAX_EPISODE_LEN = 1000
 
 ALIGNMENT_VECTOR1 = torch.cat((torch.ones(1), torch.zeros(511))).to(torch.device(device))
-ALIGNMENT_VECTOR2 = torch.cat((torch.ones(1) * -1, torch.zeros(511))).to(torch.device(device))
+ALIGNMENT_VECTOR2 = torch.cat((torch.zeros(511), torch.ones(1))).to(torch.device(device))
 
 if __name__ == "__main__":
     args = parse_args()
@@ -84,7 +84,7 @@ if __name__ == "__main__":
     envs = make_env(args.env_id, args.seed, 0, args.capture_video, run_name, args.clip_reward)()
 
     print("### USING AlignableCaslAgent AGENT ###")
-    agent = AlignableCaslAgent(envs, device, args.conv_type).to(device)
+    agent = AlignableCaslAgent(envs, device, args.norm_type, args.conv_type).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup

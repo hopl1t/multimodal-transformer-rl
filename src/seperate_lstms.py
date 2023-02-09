@@ -66,7 +66,7 @@ if __name__ == "__main__":
 
     envs = make_env(args.env_id, args.seed, 0, args.capture_video, run_name, args.clip_reward)()
 
-    agent = SeperateLstmSumAlignableAgent(envs, device, args.use_attention).to(device)
+    agent = SeperateLstmSumAlignableAgent(envs, device, args.use_attention, norm_type=args.norm_type).to(device)
     print("# USING SeperateLstmSumAlignableAgent Agent #")
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 

@@ -330,11 +330,12 @@ class AlignableCaslAgent(nn.Module):
 
 
 class SeperateLstmSumAlignableAgent(nn.Module):
-    def __init__(self, envs, device, use_attention=False, conv_type='big'):
+    def __init__(self, envs, device, use_attention=False, conv_type='big', norm_type='layer'):
         super().__init__()
         self.use_attention = use_attention
         if use_attention:
             print(f"🤖SeperateLstmSumAlignableAgent with attention🤖")
+        print(f"## USING NORM: {norm_type.upper()} ##")
         if conv_type == 'big':
             self.feature_size = 512
         else:
@@ -352,8 +353,13 @@ class SeperateLstmSumAlignableAgent(nn.Module):
                 elif "weight" in name:
                     nn.init.orthogonal_(param, 1.0)
 
-        self.video_ln = nn.LayerNorm(128)
-        self.audio_ln = nn.LayerNorm(128)
+        if norm_type == 'layer':
+            self.video_norm = nn.LayerNorm(128)
+            self.audio_norm = nn.LayerNorm(128)
+        elif norm_type == 'instance':
+            self.video_norm = nn.InstanceNorm1d(128)
+            self.audio_norm = nn.InstanceNorm1d(128)
+        
 
         if self.use_attention:
             self.attn = SeperateLstmsAttention(128)
@@ -404,8 +410,8 @@ class SeperateLstmSumAlignableAgent(nn.Module):
         new_hidden_audio = torch.flatten(torch.cat(new_hidden_audio), 0, 1)
 
         # Normalization
-        video_hidden = self.video_ln(new_hidden_video)
-        audio_hidden = self.audio_ln(new_hidden_audio)
+        video_hidden = self.video_norm(new_hidden_video)
+        audio_hidden = self.audio_norm(new_hidden_audio)
 
         # Attention
         if self.use_attention:

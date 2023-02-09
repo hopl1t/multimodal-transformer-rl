@@ -22,7 +22,7 @@ class Actions():
 
 
 class Minecraft():
-    def __init__(self):
+    def __init__(self, handle_noise=''):
         self.env_row = Config.ENV_ROW
         self.env_col = Config.ENV_COL
         self.max_iter = Config.MAX_ITER
@@ -38,6 +38,7 @@ class Minecraft():
         self.target_bad_loc = None
         self.gem_loc = None
         self.gem_type_list = ['gold', 'iron']
+        self.handle_noise = handle_noise
 
         self._init_rewards()
         self._init_gem_type()
@@ -219,6 +220,17 @@ class Minecraft():
 
     def _get_mfcc(self, filename):
         (samplerate, audio) = wav.read(filename)
+        if self.handle_noise:
+            rms = np.sqrt(np.mean(audio ** 2))
+            noise_coef = 0
+            if self.handle_noise == 'threshold':
+                if rms > 10:
+                    noise_coef = 1
+            elif self.handle_noise == 'multiply':
+                noise_coef = rms
+            elif self.handle_noise == 'sigmoid':
+                noise_coef = 1 / (1 + rms ** -0.5)
+            return self._wav_to_mfcc(samplerate, audio) * noise_coef
         return self._wav_to_mfcc(samplerate, audio)
 
     # TODO move this to a utils dir so all code can use the same one

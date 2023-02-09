@@ -147,13 +147,7 @@ if __name__ == "__main__":
     else:
         print("### USING CPU ###")
 
-    # env setup
-    # envs = gym.vector.SyncVectorEnv(
-    #     [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name) for i in range(args.num_envs)]
-    # )
-    # assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
-
-    envs = make_env(args.env_id, args.seed, 0, args.capture_video, run_name, args.clip_reward)()
+    envs = make_env(args.env_id, args.seed, 0, args.capture_video, run_name, args.clip_reward, args.noise_reduction)()
 
     print("### USING MINECRAFT CASL AGENT ###")
     agent = MinecraftAgent(envs, device, args.conv_type, attn_type='casl', fusion_type=args.fusion_type).to(device)

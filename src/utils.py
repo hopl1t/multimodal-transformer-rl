@@ -80,6 +80,8 @@ def parse_args():
         help="type of fusion to use")
     parser.add_argument("--norm-type", type=str, default="layer",
         help="Either layer, batch, instance or none")
+    parser.add_argument("--noise-reduction", type=str, default="",
+        help="Either empty string, threshold, sigmoid or multiply")
     parser.add_argument("--print-interval", type=int, default=1000,
         help="print every")
     parser.add_argument("--alignment-coef", type=float, default=0.00025,
@@ -95,9 +97,11 @@ def parse_args():
     return args
 
 
-def make_env(env_id, seed, idx, capture_video, run_name, clip_reward):
+def make_env(env_id, seed, idx, capture_video, run_name, clip_reward, noise_reduction=""):
     def thunk():
-        env = Minecraft()
+        env = Minecraft(noise_reduction)
+        if noise_reduction:
+            print(f"## USING NOISE REDUCTION {noise_reduction.upper()} ##")
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:

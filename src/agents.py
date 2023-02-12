@@ -344,6 +344,16 @@ class SeperateLstmSumAlignableAgent(nn.Module):
         self.video_net = conv_factory(conv_type)
         self.audio_net = conv_factory(conv_type)
 
+        if norm_type == 'layer':
+            self.video_norm = nn.LayerNorm(self.feature_size)
+            self.audio_norm = nn.LayerNorm(self.feature_size)
+        elif norm_type == 'instance':
+            self.video_norm = nn.InstanceNorm1d(self.feature_size)
+            self.audio_norm = nn.InstanceNorm1d(self.feature_size)
+
+        if self.use_attention:
+            self.attn = SeperateLstmsAttention(self.feature_size)
+
         self.video_lstm = nn.LSTM(self.feature_size, 128)
         self.audio_lstm = nn.LSTM(self.feature_size, 128)
         for lstm in (self.video_lstm, self.audio_lstm):
@@ -352,17 +362,6 @@ class SeperateLstmSumAlignableAgent(nn.Module):
                     nn.init.constant_(param, 0)
                 elif "weight" in name:
                     nn.init.orthogonal_(param, 1.0)
-
-        if norm_type == 'layer':
-            self.video_norm = nn.LayerNorm(128)
-            self.audio_norm = nn.LayerNorm(128)
-        elif norm_type == 'instance':
-            self.video_norm = nn.InstanceNorm1d(128)
-            self.audio_norm = nn.InstanceNorm1d(128)
-        
-
-        if self.use_attention:
-            self.attn = SeperateLstmsAttention(128)
 
         self.actor = layer_init(
             nn.Linear(128, envs.single_action_space.n), std=0.01)
@@ -377,14 +376,22 @@ class SeperateLstmSumAlignableAgent(nn.Module):
         audio_features = self.audio_net(torch.index_select(
             x, 1, torch.tensor([1]).to(self.device)))
 
+        # Normalization
+        video_features = self.video_norm(video_features)
+        audio_features = self.audio_norm(audio_features)
+
+        # Attention
+        if self.use_attention:
+            video_features, audio_features, _ = self.attn(video_features, audio_features, lstm_states)
+
         # LSTM logic
         batch_size = video_lstm_state[0].shape[1]
         done = done.reshape((-1, batch_size))
         # LSTM video
-        video_features = video_features.reshape(
+        video_features_for_lstm = video_features.reshape(
             (-1, batch_size, self.video_lstm.input_size))
         new_hidden_video = []
-        for h, d in zip(video_features, done):
+        for h, d in zip(video_features_for_lstm, done):
             h, video_lstm_state = self.video_lstm(
                 h.unsqueeze(0),
                 (
@@ -395,10 +402,10 @@ class SeperateLstmSumAlignableAgent(nn.Module):
             new_hidden_video += [h]
         new_hidden_video = torch.flatten(torch.cat(new_hidden_video), 0, 1)
         # LSTM audio
-        audio_features = audio_features.reshape(
+        audio_features_for_lstm = audio_features.reshape(
             (-1, batch_size, self.audio_lstm.input_size))
         new_hidden_audio = []
-        for h, d in zip(audio_features, done):
+        for h, d in zip(audio_features_for_lstm, done):
             h, audio_lstm_state = self.audio_lstm(
                 h.unsqueeze(0),
                 (
@@ -408,19 +415,11 @@ class SeperateLstmSumAlignableAgent(nn.Module):
             )
             new_hidden_audio += [h]
         new_hidden_audio = torch.flatten(torch.cat(new_hidden_audio), 0, 1)
-
-        # Normalization
-        video_hidden = self.video_norm(new_hidden_video)
-        audio_hidden = self.audio_norm(new_hidden_audio)
-
-        # Attention
-        if self.use_attention:
-            video_hidden, audio_hidden, _ = self.attn(video_hidden, audio_hidden, lstm_states)
         
         # Fusion
-        concatanated_features = video_hidden + audio_hidden
+        concatanated_features = new_hidden_video + new_hidden_audio
 
-        return concatanated_features, (video_lstm_state, audio_lstm_state), (video_hidden, audio_hidden)
+        return concatanated_features, (video_lstm_state, audio_lstm_state), (video_features, audio_features)
 
     def get_value(self, x, lstm_state, done):
         hidden, _, _ = self.get_states(x, lstm_state, done)

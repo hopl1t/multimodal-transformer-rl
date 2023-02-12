@@ -22,8 +22,8 @@ MAX_EPISODE_LEN = 1000
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-ALIGNMENT_VECTOR1 = torch.cat((torch.ones(1), torch.zeros(127))).to(torch.device(device))
-ALIGNMENT_VECTOR2 = torch.cat((torch.zeros(127), torch.ones(1))).to(torch.device(device))
+ALIGNMENT_VECTOR1 = torch.cat((torch.ones(1), torch.zeros(511))).to(torch.device(device))
+ALIGNMENT_VECTOR2 = torch.cat((torch.zeros(511), torch.ones(1))).to(torch.device(device))
 
 if __name__ == "__main__":
     args = parse_args()

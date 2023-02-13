@@ -125,8 +125,6 @@ class MinecraftAgent(nn.Module):
             self.lstm_size =  self.feature_size
             if attn_type == 'casl':
                 self.attn = CaslAttention(self.feature_size)
-            elif attn_type == 'new':
-                self.attn = NewAttention(self.feature_size)
             else:
                 raise NotImplementedError
         
@@ -512,5 +510,96 @@ class FixedAttentionAgent(nn.Module):
         return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), lstm_state
 
 
+class IBAgent(nn.Module):
+    def __init__(self, envs, device):
+        super().__init__()
+        print(
+            f"🤖Using IB agent🤖")
+        self.feature_size = 512
+        self.lstm_size = self.feature_size
+        self.attn = CaslAttention(self.feature_size)
+
+        self.video_net = conv_factory('big')
+        self.audio_net = conv_factory('big')
+
+        self.video_reconstruction = nn.Sequential(
+            nn.Linear(self.feature_size, self.feature_size),
+            nn.ReLU(),
+            nn.Linear(self.feature_size, self.feature_size),
+        )
+
+        self.audio_reconstruction = nn.Sequential(
+            nn.Linear(self.feature_size, self.feature_size),
+            nn.ReLU(),
+            nn.Linear(self.feature_size, self.feature_size),
+        )
+
+        self.lstm = nn.LSTM(self.lstm_size, 128)
+        for name, param in self.lstm.named_parameters():
+            if "bias" in name:
+                nn.init.constant_(param, 0)
+            elif "weight" in name:
+                nn.init.orthogonal_(param, 1.0)
+        self.actor = layer_init(
+            nn.Linear(128, envs.single_action_space.n), std=0.01)
+        self.critic = layer_init(nn.Linear(128, 1), std=1)
+        self.device = device
+
+    def get_states(self, x, lstm_state, done):
+        video_features = self.video_net(torch.index_select(
+            x, 1, torch.tensor([0]).to(self.device)))
+        audio_features = self.audio_net(torch.index_select(
+            x, 1, torch.tensor([1]).to(self.device)))
+        video_features, audio_features, attn_weights = self.attn(
+            video_features, audio_features, lstm_state)
+        # fused_features = torch.cat((video_features, audio_features), dim=1)
+        fused_features = video_features + audio_features
+
+        # Feature reconstruction
+        reconstructed_audio = self.audio_reconstruction(video_features)
+        reconstructed_video = self.audio_reconstruction(audio_features)
+
+        # LSTM logic
+        batch_size = lstm_state[0].shape[1]
+        fused_features = fused_features.reshape(
+            (-1, batch_size, self.lstm.input_size))
+        done = done.reshape((-1, batch_size))
+        new_hidden = []
+        for h, d in zip(fused_features, done):
+            h, lstm_state = self.lstm(
+                h.unsqueeze(0),
+                (
+                    (1.0 - d).view(1, -1, 1) * lstm_state[0],
+                    (1.0 - d).view(1, -1, 1) * lstm_state[1],
+                ),
+            )
+            new_hidden += [h]
+        new_hidden = torch.flatten(torch.cat(new_hidden), 0, 1)
+
+        return new_hidden, lstm_state, (video_features, audio_features), (reconstructed_video, reconstructed_audio)
+
+    def get_value(self, x, lstm_state, done):
+        hidden, _, _, _ = self.get_states(x, lstm_state, done)
+        return self.critic(hidden)
+
+    def get_action_and_value(self, x, lstm_state, done, action=None):
+        hidden, lstm_state, (video_features, audio_features), (reconstructed_video, reconstructed_audio) = self.get_states(x, lstm_state, done)
+        logits = self.actor(hidden)
+        probs = Categorical(logits=logits)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), lstm_state, (video_features, audio_features), (reconstructed_video, reconstructed_audio)
 
 
+class ModalityAdversary(nn.Module):
+    def __init__(self, feature_size=512):
+        super().__init__()
+        self.feature_size = 512
+
+        self.adverserial_net = nn.Sequential(
+            nn.Linear(self.feature_size, self.feature_size),
+            nn.ReLU(),
+            nn.Linear(self.feature_size, self.feature_size),
+        )
+    def forward(self, modality):
+        return self.adverserial_net(modality)

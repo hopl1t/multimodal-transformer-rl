@@ -92,6 +92,10 @@ def parse_args():
         help="Toggles whether or not to use alignment in esr.")
     parser.add_argument("--use-attention", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="Toggles whether or not to use attention in esr.")
+    parser.add_argument("--reconstruction-coef", type=float, default=0.01,
+        help="coefficient of the entropy")
+    parser.add_argument("--adverserial-coef", type=float, default=0.01,
+        help="coefficient of the entropy")
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)

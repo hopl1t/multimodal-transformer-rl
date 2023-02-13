@@ -86,6 +86,8 @@ def parse_args():
         help="print every")
     parser.add_argument("--alignment-coef", type=float, default=0.00025,
         help="coefficient of the entropy")
+    parser.add_argument("--audio-ratio", type=float, default=0,
+        help="If stated uses FixedAttention and sets this as default audio ratio")
     parser.add_argument("--use-alignment", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="Toggles whether or not to use alignment in esr.")
     parser.add_argument("--use-attention", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
@@ -123,3 +125,21 @@ def distance_func(tensor1, tensor2, distance_type='cosine'):
                            torch.nn.KLDivLoss()(tensor2, tensor1)).sum() / tensor1.shape[0]
     return similarity_loss
 
+def get_last_k_audio_obs(obs_tensor, dones_tensor, current_idx, k=10, obs_size=(84,84)):
+    """
+    Gets the last k audio observations. Truncates at the first done, buffers with zeros.
+    This is used for time series convolutions.
+    """
+    audio_observations = obs_tensor[:, :, 1, :, :]
+    audio_observations = audio_observations[:current_idx+1][-k:]
+    dones_tensor = dones_tensor[:current_idx+1]
+    done_indices = dones_tensor.nonzero().flatten()
+    if len(done_indices) > 0:
+        last_done_index = done_indices[-1]
+    else:  # no done episdoe yet
+        last_done_index = 0
+    audio_time_series = audio_observations[last_done_index:]
+    if len(audio_time_series) < k:
+        padding = torch.zeros((k - len(audio_time_series), 1) + obs_size)
+        audio_time_series = torch.cat((padding, audio_time_series))
+    return audio_time_series

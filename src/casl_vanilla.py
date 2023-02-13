@@ -25,7 +25,7 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
     MaxAndSkipEnv,
     NoopResetEnv,
 )
-from agents import MinecraftAgent
+from agents import MinecraftAgent, FixedAttentionAgent
 from utils import parse_args, make_env
 
 MAX_EPISODE_LEN = 1000
@@ -149,8 +149,11 @@ if __name__ == "__main__":
 
     envs = make_env(args.env_id, args.seed, 0, args.capture_video, run_name, args.clip_reward, args.noise_reduction)()
 
-    print("### USING MINECRAFT CASL AGENT ###")
-    agent = MinecraftAgent(envs, device, args.conv_type, attn_type='casl', fusion_type=args.fusion_type).to(device)
+    if args.audio_ratio:
+        agent = FixedAttentionAgent(envs, device, args.conv_type, audio_ratio=args.audio_ratio).to(device)
+    else:
+        print("### USING MINECRAFT CASL AGENT ###")
+        agent = MinecraftAgent(envs, device, args.conv_type, attn_type='casl', fusion_type=args.fusion_type).to(device)
 
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 

@@ -1,3 +1,7 @@
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
 import gym
 from distutils.util import strtobool
 import argparse
@@ -72,8 +76,6 @@ def parse_args():
     # new args
     parser.add_argument("--clip-reward", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="Toggles whether or not to use a clipped reward env wrapper.")
-    parser.add_argument("--conv-type", type=str, default="big",
-        help="type of conv to use")
     parser.add_argument("--attn-type", type=str, default="",
         help="type of attn to use")
     parser.add_argument("--fusion-type", type=str, default="sum",
@@ -90,12 +92,18 @@ def parse_args():
         help="If stated uses FixedAttention and sets this as default audio ratio")
     parser.add_argument("--use-alignment", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="Toggles whether or not to use alignment in esr.")
-    parser.add_argument("--use-attention", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
-        help="Toggles whether or not to use attention in esr.")
     parser.add_argument("--reconstruction-coef", type=float, default=0.01,
         help="coefficient of the entropy")
     parser.add_argument("--adverserial-coef", type=float, default=0.01,
         help="coefficient of the entropy")
+    parser.add_argument("--conv-type", type=str, default="big",
+        help="type of conv to use")
+    parser.add_argument("--use-attention", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
+        help="Toggles whether or not to use attention in esr.")
+    parser.add_argument("--ib-beta", type=float, default=0,
+        help="IB beta coefficient")
+    parser.add_argument("--dropout-ratio", type=float, default=0,
+        help="Drop out ratio")
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
@@ -147,3 +155,5 @@ def get_last_k_audio_obs(obs_tensor, dones_tensor, current_idx, k=10, obs_size=(
         padding = torch.zeros((k - len(audio_time_series), 1) + obs_size)
         audio_time_series = torch.cat((padding, audio_time_series))
     return audio_time_series
+
+

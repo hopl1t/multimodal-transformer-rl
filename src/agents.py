@@ -9,7 +9,11 @@ import gym
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.nn.parameter import Parameter
+from torch.nn.init import xavier_normal
 import torch.optim as optim
+from torch.autograd import Variable
+import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
@@ -603,3 +607,113 @@ class ModalityAdversary(nn.Module):
         )
     def forward(self, modality):
         return self.adverserial_net(modality)
+
+
+class VIBAgent(nn.Module):
+    def __init__(self, envs, device, conv_type='big', use_attn=False, fusion_type='sum', dropout_ratio=0):
+        super().__init__()
+        print(f"🤖Using VIB agent🤖")
+        print(f"🤖Using attention {use_attn}, conv_type: {conv_type}, fusion type: {fusion_type}, dropout: {dropout_ratio}, 🤖")
+        self.use_attn = use_attn
+        self.fusion_type = fusion_type
+        self.dropout_ratio = dropout_ratio
+        if conv_type == 'big':
+            self.feature_size = 512
+        else:
+            self.feature_size = 256
+        self.lstm_size = self.feature_size
+        if use_attn:
+            self.attn = CaslAttention(self.feature_size)
+
+        self.video_net = conv_factory(conv_type)
+        self.audio_net = conv_factory(conv_type)
+
+        if self.fusion_type == 'tensor':
+            self.pre_fusion = nn.Linear(self.feature_size, 50)
+
+        if dropout_ratio:
+            self.post_fusion_dropout = nn.Dropout(p=dropout_ratio)
+        
+        self.post_fusion_layer_1 = nn.Linear(
+            (self.feature_size + 1) * (self.feature_size + 1), self.feature_size)
+        # self.post_fusion_layer_2 = nn.Linear(self.lstm_size, self.lstm_size)
+
+        self.fc_mu = nn.Linear(self.feature_size, self.feature_size)
+        self.fc_std = nn.Linear(self.feature_size, self.feature_size)
+
+        self.lstm = nn.LSTM(self.lstm_size, 128)
+        for name, param in self.lstm.named_parameters():
+            if "bias" in name:
+                nn.init.constant_(param, 0)
+            elif "weight" in name:
+                nn.init.orthogonal_(param, 1.0)
+        self.actor = layer_init(
+            nn.Linear(128, envs.single_action_space.n), std=0.01)
+        self.critic = layer_init(nn.Linear(128, 1), std=1)
+        self.device = device
+
+    def get_states(self, x, lstm_state, done):
+        video_features = self.video_net(torch.index_select(
+            x, 1, torch.tensor([0]).to(self.device)))
+        audio_features = self.audio_net(torch.index_select(
+            x, 1, torch.tensor([1]).to(self.device)))
+        if self.use_attn:
+            video_features, audio_features, attn_weights = self.attn(
+                video_features, audio_features, lstm_state)
+
+        # attn
+        if self.use_attn:
+            video_features, audio_features, _ = self.attn(video_features, audio_features, lstm_state)
+
+        # Fusion
+        if self.fusion_type == 'tensor':
+            _audio_h = torch.cat(
+                (Variable(torch.ones(audio_features.size(0), 1).type(torch.FloatTensor).to(self.device), requires_grad=False), audio_features), dim=1)
+            _video_h = torch.cat(
+                (Variable(torch.ones(video_features.size(0), 1).type(torch.FloatTensor).to(self.device), requires_grad=False), video_features), dim=1)
+            fusion_tensor = torch.bmm(_audio_h.unsqueeze(2), _video_h.unsqueeze(1))
+            fusion_tensor = fusion_tensor.view(-1, (audio_features.size(1) + 1) * (video_features.size(1) + 1), 1)
+        else:
+            fusion_tensor = video_features + audio_features
+
+        if self.dropout_ratio:
+            fusion_tensor = self.post_fusion_dropout(fusion_tensor)
+
+        if self.fusion_type == 'tensor':        
+            fusion_tensor = (self.post_fusion_layer_1(fusion_tensor))
+
+        # Reparameterization
+        mu = self.fc_mu(fusion_tensor)
+        std = F.softplus(self.fc_std(fusion_tensor)-5, beta=1)
+        eps = torch.randn_like(std)
+        z = mu + std*eps
+
+        # LSTM logic
+        batch_size = lstm_state[0].shape[1]
+        z = z.reshape(
+            (-1, batch_size, self.lstm.input_size))
+        done = done.reshape((-1, batch_size))
+        new_hidden = []
+        for h, d in zip(z, done):
+            h, lstm_state = self.lstm(
+                h.unsqueeze(0),
+                (
+                    (1.0 - d).view(1, -1, 1) * lstm_state[0],
+                    (1.0 - d).view(1, -1, 1) * lstm_state[1],
+                ),
+            )
+            new_hidden += [h]
+        new_hidden = torch.flatten(torch.cat(new_hidden), 0, 1)
+        return new_hidden, lstm_state, (mu, std)
+
+    def get_value(self, x, lstm_state, done):
+        hidden, _, _ = self.get_states(x, lstm_state, done)
+        return self.critic(hidden)
+
+    def get_action_and_value(self, x, lstm_state, done, action=None):
+        hidden, lstm_state, (mu, std) = self.get_states(x, lstm_state, done)
+        logits = self.actor(hidden)
+        probs = Categorical(logits=logits)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), lstm_state, (mu, std)

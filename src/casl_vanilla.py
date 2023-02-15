@@ -153,7 +153,7 @@ if __name__ == "__main__":
         agent = FixedAttentionAgent(envs, device, args.conv_type, audio_ratio=args.audio_ratio).to(device)
     else:
         print("### USING MINECRAFT CASL AGENT ###")
-        agent = MinecraftAgent(envs, device, args.conv_type, attn_type='casl', fusion_type=args.fusion_type).to(device)
+        agent = MinecraftAgent(envs, device, args.conv_type, attn_type='casl', fusion_type=args.fusion_type, init_bias=args.init_bias, min_audio_attn=args.min_audio_attn).to(device)
 
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 

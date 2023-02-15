@@ -66,12 +66,21 @@ def conv_factory(size='big'):
 
 
 class CaslAttention(nn.Module):
-    def __init__(self, feature_input_size):
+    def __init__(self, feature_input_size, device, init_bias=0, min_audio_attn=0):
         super().__init__()
+        self.init_bias = init_bias
+        self.min_audio_attn = min_audio_attn
+        self.device = device
+        if init_bias or min_audio_attn:
+            print(f"# INITIALIZING CASL ATTENTION WITH bias: {init_bias}, min_audio_attn: {min_audio_attn}")
         self.audio_fc = nn.Linear(feature_input_size, 32)
         self.video_fc = nn.Linear(feature_input_size, 32)
         self.state_fc = nn.Linear(128, 32)
         self.attention = nn.Linear(32, 2)
+        if init_bias:
+            nn.init.normal_(self.attention.weight, mean=0.0, std=0.02)
+            nn.init.constant_(self.attention.bias[0], init_bias)
+            nn.init.constant_(self.attention.bias[1], 0.0)
     
     def forward(self, video_features, audio_features, lstm_state):
         attn_video_features = self.video_fc(video_features)
@@ -80,6 +89,11 @@ class CaslAttention(nn.Module):
         attn_lstm_state = self.state_fc(lstm_state[0])
         activated = torch.tanh(attn_video_features + attn_audio_features + attn_lstm_state)
         attention_weights = torch.softmax(self.attention(activated).squeeze(0), axis=-1)
+        if self.min_audio_attn:
+            new_audio_weight = torch.maximum(attention_weights[:, 1], torch.tensor(self.min_audio_attn).to(self.device))
+            # compensation for video s.t. the sum is 1
+            new_video_weight = torch.minimum(attention_weights[:, 0], torch.tensor(1 - self.min_audio_attn).to(self.device))
+            attention_weights = torch.cat((new_video_weight, new_audio_weight), -1).unsqueeze(0)
         video_features = attention_weights[:, 0].unsqueeze(1) * video_features
         audio_features = attention_weights[:, 1].unsqueeze(1) * audio_features
         return video_features, audio_features, attention_weights
@@ -110,7 +124,7 @@ class SeperateLstmsAttention(nn.Module):
 
 
 class MinecraftAgent(nn.Module):
-    def __init__(self, envs, device, conv_type='big', attn_type='casl', fusion_type='sum'):
+    def __init__(self, envs, device, conv_type='big', attn_type='casl', fusion_type='sum', init_bias=False, min_audio_attn=0):
         super().__init__()
         print(
             f"🤖Using attention {attn_type}, conv_type: {conv_type}, fusion_type: {fusion_type}🤖")
@@ -128,7 +142,8 @@ class MinecraftAgent(nn.Module):
         else:
             self.lstm_size =  self.feature_size
             if attn_type == 'casl':
-                self.attn = CaslAttention(self.feature_size)
+                self.attn = CaslAttention(
+                    self.feature_size, device=device, init_bias=init_bias, min_audio_attn=min_audio_attn)
             else:
                 raise NotImplementedError
         
@@ -246,7 +261,7 @@ class AlignableCaslAgent(nn.Module):
 
         self.norm_type = norm_type
         self.lstm_size = self.feature_size
-        self.attn = CaslAttention(self.feature_size)
+        self.attn = CaslAttention(self.feature_size, device=device)
 
         self.video_net = conv_factory(conv_type)
         self.audio_net = conv_factory(conv_type)
@@ -521,7 +536,7 @@ class IBAgent(nn.Module):
             f"🤖Using IB agent🤖")
         self.feature_size = 512
         self.lstm_size = self.feature_size
-        self.attn = CaslAttention(self.feature_size)
+        self.attn = CaslAttention(self.feature_size, device=device)
 
         self.video_net = conv_factory('big')
         self.audio_net = conv_factory('big')
@@ -623,7 +638,7 @@ class VIBAgent(nn.Module):
             self.feature_size = 256
         self.lstm_size = self.feature_size
         if use_attn:
-            self.attn = CaslAttention(self.feature_size)
+            self.attn = CaslAttention(self.feature_size, device=device)
 
         self.video_net = conv_factory(conv_type)
         self.audio_net = conv_factory(conv_type)

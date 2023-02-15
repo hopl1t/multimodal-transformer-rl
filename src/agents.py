@@ -657,13 +657,10 @@ class VIBAgent(nn.Module):
             x, 1, torch.tensor([0]).to(self.device)))
         audio_features = self.audio_net(torch.index_select(
             x, 1, torch.tensor([1]).to(self.device)))
-        if self.use_attn:
-            video_features, audio_features, attn_weights = self.attn(
-                video_features, audio_features, lstm_state)
 
         # attn
         if self.use_attn:
-            video_features, audio_features, _ = self.attn(video_features, audio_features, lstm_state)
+            video_features, audio_features, attn_weights = self.attn(video_features, audio_features, lstm_state)
 
         # Fusion
         if self.fusion_type == 'tensor':

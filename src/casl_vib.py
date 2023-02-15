@@ -226,7 +226,9 @@ if __name__ == "__main__":
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
                 # Information loss
-                kl = 0.5 * torch.mean(mu.pow(2) + std.pow(2) - 2*std.log() - 1)
+                # normalization_loss = -0.5 * (1 + 2 * std.log() - mu.pow(2) - std.pow(2)).sum()  # From aml project
+                # return reconstruction_loss + beta * normalization_loss
+                kl = -0.5 * torch.mean(mu.pow(2) + std.pow(2) - 2*std.log() - 1)  # this is positive kl, needs to be negated for loss as we wan to increase kl
                 info_loss = args.ib_beta * kl
 
                 entropy_loss = entropy.mean()

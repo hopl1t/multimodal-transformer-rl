@@ -629,15 +629,14 @@ class VIBAgent(nn.Module):
         self.audio_net = conv_factory(conv_type)
 
         if self.fusion_type == 'tensor':
-            self.pre_fusion = nn.Linear(self.feature_size, 50)
+            self.pre_fusion_video = nn.Linear(self.feature_size, 50)
+            self.pre_fusion_audio = nn.Linear(self.feature_size, 50)
+            self.post_fusion_layer = nn.Linear((50 + 1) * (50 + 1), self.feature_size)
+            # self.post_fusion_layer_2 = nn.Linear(self.lstm_size, self.lstm_size)
 
         if dropout_ratio:
             self.post_fusion_dropout = nn.Dropout(p=dropout_ratio)
         
-        self.post_fusion_layer_1 = nn.Linear(
-            (self.feature_size + 1) * (self.feature_size + 1), self.feature_size)
-        # self.post_fusion_layer_2 = nn.Linear(self.lstm_size, self.lstm_size)
-
         self.fc_mu = nn.Linear(self.feature_size, self.feature_size)
         self.fc_std = nn.Linear(self.feature_size, self.feature_size)
 
@@ -664,20 +663,21 @@ class VIBAgent(nn.Module):
 
         # Fusion
         if self.fusion_type == 'tensor':
+            video_features = self.pre_fusion_video(video_features)
+            audio_features = self.pre_fusion_audio(audio_features)
             _audio_h = torch.cat(
                 (Variable(torch.ones(audio_features.size(0), 1).type(torch.FloatTensor).to(self.device), requires_grad=False), audio_features), dim=1)
             _video_h = torch.cat(
                 (Variable(torch.ones(video_features.size(0), 1).type(torch.FloatTensor).to(self.device), requires_grad=False), video_features), dim=1)
             fusion_tensor = torch.bmm(_audio_h.unsqueeze(2), _video_h.unsqueeze(1))
-            fusion_tensor = fusion_tensor.view(-1, (audio_features.size(1) + 1) * (video_features.size(1) + 1), 1)
+            fusion_tensor = fusion_tensor.view(-1, (audio_features.size(1) + 1) * (video_features.size(1) + 1))
+            # fusion_tensor = fusion_tensor.view(-1, (audio_features.size(1) + 1) * (video_features.size(1) + 1), 1)
+            fusion_tensor = self.post_fusion_layer(fusion_tensor)
         else:
             fusion_tensor = video_features + audio_features
 
         if self.dropout_ratio:
             fusion_tensor = self.post_fusion_dropout(fusion_tensor)
-
-        if self.fusion_type == 'tensor':        
-            fusion_tensor = (self.post_fusion_layer_1(fusion_tensor))
 
         # Reparameterization
         mu = self.fc_mu(fusion_tensor)

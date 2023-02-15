@@ -188,19 +188,19 @@ class MinecraftAgent(nn.Module):
             )
             new_hidden += [h]
         new_hidden = torch.flatten(torch.cat(new_hidden), 0, 1)
-        return new_hidden, lstm_state
+        return new_hidden, lstm_state, attn_weights
 
     def get_value(self, x, lstm_state, done):
-        hidden, _ = self.get_states(x, lstm_state, done)
+        hidden, _, _ = self.get_states(x, lstm_state, done)
         return self.critic(hidden)
 
     def get_action_and_value(self, x, lstm_state, done, action=None):
-        hidden, lstm_state = self.get_states(x, lstm_state, done)
+        hidden, lstm_state, attn_weights = self.get_states(x, lstm_state, done)
         logits = self.actor(hidden)
         probs = Categorical(logits=logits)
         if action is None:
             action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), lstm_state
+        return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), lstm_state, attn_weights
 
 
 class GymAgent(nn.Module):

@@ -194,7 +194,7 @@ if __name__ == "__main__":
 
             # ALGO LOGIC: action logic
             with torch.no_grad():
-                action, logprob, _, value, next_lstm_state = agent.get_action_and_value(next_obs, next_lstm_state, next_done)
+                action, logprob, _, value, next_lstm_state, _ = agent.get_action_and_value(next_obs, next_lstm_state, next_done)
                 values[step] = value.flatten()
             actions[step] = action
             logprobs[step] = logprob
@@ -272,7 +272,7 @@ if __name__ == "__main__":
                 mbenvinds = envinds[start:end]
                 mb_inds = flatinds[:, mbenvinds].ravel()  # be really careful about the index
 
-                _, newlogprob, entropy, newvalue, _ = agent.get_action_and_value(
+                _, newlogprob, entropy, newvalue, _, attn_weights = agent.get_action_and_value(
                     b_obs[mb_inds],
                     (initial_lstm_state[0][:, mbenvinds], initial_lstm_state[1][:, mbenvinds]),
                     b_dones[mb_inds],
@@ -339,6 +339,8 @@ if __name__ == "__main__":
         if not (episode % (args.print_interval * 20)) and episode:
             print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        writer.add_scalar("charts/avg_video_attn", attn_weights[:,0].mean(), global_step)
+        writer.add_scalar("charts/avg_audio_attn", attn_weights[:,1].mean(), global_step)
 
     envs.close()
     writer.close()

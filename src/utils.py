@@ -110,6 +110,8 @@ def parse_args():
         help="The maximal amount of attention the audio channel can receive")
     parser.add_argument("--init-bias", type=float, default=0,
         help="How much extra bias to give video attention over audio")
+    parser.add_argument("--init-weights", type=float, default=0,
+        help="The initialization mean of video weights (audio is always 0)")
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)

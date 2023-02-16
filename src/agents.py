@@ -66,14 +66,14 @@ def conv_factory(size='big'):
 
 
 class CaslAttention(nn.Module):
-    def __init__(self, feature_input_size, device, init_bias=0, min_audio_attn=0, max_audio_attn=1):
+    def __init__(self, feature_input_size, device, init_bias=0, init_weights=0, min_audio_attn=0, max_audio_attn=1):
         super().__init__()
         self.init_bias = init_bias
         self.min_audio_attn = min_audio_attn
         self.max_audio_attn = max_audio_attn
+        self.init_weights = init_weights
         self.device = device
-        if init_bias or min_audio_attn:
-            print(f"# INITIALIZING CASL ATTENTION WITH bias: {init_bias}, min_audio_attn: {min_audio_attn}, max_audio_attn: {max_audio_attn}")
+        print(f"# INITIALIZING CASL ATTENTION WITH bias: {init_bias}, INIT WEIGHTS: {init_weights}, min_audio_attn: {min_audio_attn}, max_audio_attn: {max_audio_attn}")
         self.audio_fc = nn.Linear(feature_input_size, 32)
         self.video_fc = nn.Linear(feature_input_size, 32)
         self.state_fc = nn.Linear(128, 32)
@@ -82,6 +82,9 @@ class CaslAttention(nn.Module):
             nn.init.normal_(self.attention.weight, mean=0.0, std=0.02)
             nn.init.constant_(self.attention.bias[0], init_bias)
             nn.init.constant_(self.attention.bias[1], 0.0)
+        if init_weights:
+            nn.init.normal_(self.attention.weight[0], mean=0.0, std=0.02)
+            nn.init.normal_(self.attention.weight[1], mean=init_weights, std=0.02)
     
     def forward(self, video_features, audio_features, lstm_state):
         attn_video_features = self.video_fc(video_features)
@@ -130,7 +133,7 @@ class SeperateLstmsAttention(nn.Module):
 
 
 class MinecraftAgent(nn.Module):
-    def __init__(self, envs, device, conv_type='big', attn_type='casl', fusion_type='sum', init_bias=False, min_audio_attn=0, max_audio_attn=1):
+    def __init__(self, envs, device, conv_type='big', attn_type='casl', fusion_type='sum', init_bias=False, init_weights=0, min_audio_attn=0, max_audio_attn=1):
         super().__init__()
         print(
             f"🤖Using attention {attn_type}, conv_type: {conv_type}, fusion_type: {fusion_type}🤖")
@@ -149,7 +152,7 @@ class MinecraftAgent(nn.Module):
             self.lstm_size =  self.feature_size
             if attn_type == 'casl':
                 self.attn = CaslAttention(
-                    self.feature_size, device=device, init_bias=init_bias, min_audio_attn=min_audio_attn, max_audio_attn=max_audio_attn)
+                    self.feature_size, device=device, init_bias=init_bias, init_weights=init_weights, min_audio_attn=min_audio_attn, max_audio_attn=max_audio_attn)
             else:
                 raise NotImplementedError
         

@@ -106,6 +106,8 @@ def parse_args():
         help="Drop out ratio")
     parser.add_argument("--min-audio-attn", type=float, default=0,
         help="The minimal amount of attention the audio channel can receive")
+    parser.add_argument("--max-audio-attn", type=float, default=1,
+        help="The maximal amount of attention the audio channel can receive")
     parser.add_argument("--init-bias", type=float, default=0,
         help="How much extra bias to give video attention over audio")
     args = parser.parse_args()

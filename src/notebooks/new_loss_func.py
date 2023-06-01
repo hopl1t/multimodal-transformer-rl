@@ -144,6 +144,7 @@ def get_logits_dataloader(model, original_loader, batch_size=32, whiten=False):
         return logits_dataloader
     
 EPSILON = torch.tensor(1e-40).to(device)
+NP_EPSILON = 1e-300
 
 def get_multivariate_gaussian_entropy(std, epsilon=EPSILON):
     """
@@ -169,7 +170,7 @@ def get_multinomial_entropy(logits, epsilon=EPSILON):
     return (probs * torch.log(1/probs)).sum(dim=-1).mean()
 
 
-def get_kld_between_multivariate_gaussians(mu1, std1, mu2, std2, epsilon=EPSILON):
+def get_kld_between_multivariate_gaussians(mu1, std1, mu2, std2, epsilon=NP_EPSILON):
     """
     Computes batch wise KLD - Will return a tensor in the shape of batch_size where each entry is the sum over all dimensions of the KLD between the two corresponding mu and sigma.
     assuming diagonal cov matrix as 1d ndarray
@@ -187,23 +188,27 @@ def get_kld_between_multivariate_gaussians(mu1, std1, mu2, std2, epsilon=EPSILON
     get_kld_between_multivariate_gaussians(base_mu[1].unsqueeze(0), base_std[1].unsqueeze(0), mu[1].unsqueeze(0), std[1].unsqueeze(0))
     get_kld_between_multivariate_gaussians(base_mu[0:2], base_std[0:2], mu[0:2], std[0:2])
     """
-    mu1 = mu1.to(torch.float64)
-    std1 = std1.to(torch.float64)
-    mu2 = mu2.to(torch.float64)
-    std2 = std2.to(torch.float64)
+    MINIMAL_LOG_VALUE = -1500
+
+    mu1 = mu1.cpu().numpy().astype(np.float128)
+    std1 = std1.cpu().numpy().astype(np.float128)
+    mu2 = mu2.cpu().numpy().astype(np.float128)
+    std2 = std2.cpu().numpy().astype(np.float128)
 
     N, D = mu1.shape
 
-    # Compute the log term
-    log_term = torch.log(torch.clamp(torch.prod(
-        std2, dim=-1) / torch.prod(std1, dim=-1), min=epsilon))
+    # Compute the determinante log ratio term
+    log_term = np.log(np.prod(std2, axis=-1) / np.prod(std1, axis=-1))
+
+    # In case one of the denominator values has zeroized due to floating point percision
+    log_term = np.where(log_term == -np.inf, MINIMAL_LOG_VALUE, log_term)
 
     # Compute the trace term
-    trace_term = ((1 / std2) * std1).sum(dim=-1)
+    trace_term = ((1 / std2) * std1).sum(axis=-1)
 
     # Compute the quadratic term
     mu_diff = mu2 - mu1
-    quadratic_term = torch.sum((mu_diff * (1 / std2) * mu_diff), dim=-1)
+    quadratic_term = np.sum((mu_diff * (1 / std2) * mu_diff), axis=-1)
 
     # Compute the KLD for each pair of Gaussians
     kld = 0.5 * (log_term - D + trace_term + quadratic_term)
@@ -535,12 +540,13 @@ def loop_data(model, train_dataloader, test_dataloader, beta, writer, epochs,
                 if loss_type == 'ppo':
                     if i == 0:
                         kld_from_base_dist = 0
+                        ratio = 0
                     else:
                         with torch.no_grad():
                             kld_from_base_dist = get_kld_between_multivariate_gaussians(base_mu, base_std, mu, std).mean()
-                    # Replacing Beta
-                    ratio = kld_from_base_dist / \
-                        (kld_from_std_normal + kld_from_base_dist)
+                    with torch.no_grad():
+                        ratio = kld_from_base_dist / \
+                            (kld_from_std_normal + kld_from_base_dist)
                     minibatch_loss = classification_loss + \
                         (beta * ratio).mean() * kld_from_std_normal.sum()
                 elif loss_type == 'vub':
@@ -886,16 +892,16 @@ def get_dataloaders(data_class, logits=False):
                                 download=True, transform=test_transform)
 
     train_loader = DataLoader(train_data,
-                                    batch_size=batch_size,
-                                    shuffle=True,
-                                    num_workers=NUM_WORKERS,
-                                    drop_last=True)
+                            batch_size=batch_size,
+                            shuffle=True,
+                            num_workers=NUM_WORKERS,
+                            drop_last=True)
 
     test_loader = DataLoader(test_data,
-                                   batch_size=batch_size,
-                                shuffle=False,
-                                num_workers=NUM_WORKERS,
-                                drop_last=False)
+                            batch_size=batch_size,
+                            shuffle=False,
+                            num_workers=NUM_WORKERS,
+                            drop_last=False)
 
     classes = train_data.classes
 
@@ -926,7 +932,7 @@ class MNIST_CNN(nn.Module):
 def train_and_eval_cdlvm(data_class, betas=[0.0001, 0.001, 0.01, 0.1, 1, 10, 100, 1000],
                          epsilons=[0.1, 0.35, 0.4, 0.45, 0.5], loss_type='vib',
                           kl_rate_loss=False, clip_grad=False, clip_loss=True,
-                         num_minibatches=1, num_runs=1, eval_vanilla=False):
+                         num_minibatches=1, num_runs=1):
     """
     DLVM == conditional deep latent variational model
     """
@@ -962,7 +968,7 @@ def train_and_eval_cdlvm(data_class, betas=[0.0001, 0.001, 0.01, 0.1, 1, 10, 100
         target_label = 15  # Camel
         max_grad_norm = 2.5
     elif data_class == 'imagenet':
-        fc_name = 'fc2'
+        fc_name = 'fc'
         epochs = 100
         hidden_size = 2048
         pretrained_path = '/D/models/pretrained/inceptionv3.pkl'
@@ -975,8 +981,8 @@ def train_and_eval_cdlvm(data_class, betas=[0.0001, 0.001, 0.01, 0.1, 1, 10, 100
     logits_train_data_loader, logits_test_data_loader = get_dataloaders(data_class, logits=True)
     train_data_loader, test_data_loader = get_dataloaders(data_class, logits=False)
 
-    if eval_vanilla:
-        print(f"\n### Evaluating pretrained model ###")
+    if loss_type == 'vanilla':
+        print(f"\n### Evaluating pretrained vanilla model ###")
         pretrained_model = torch.load(pretrained_path)
         pretrained_model.to(device)
         pretrained_model.eval()
@@ -997,6 +1003,9 @@ def train_and_eval_cdlvm(data_class, betas=[0.0001, 0.001, 0.01, 0.1, 1, 10, 100
             writer.add_scalar("charts/targeted_succesful_attacks", targeted_total_succesful_attacks_list[i], eps)
         wandb_run.finish()
         results_dict['pretrained_vanilla_model'] = {
+            'dict_name': pkl_name,
+            'beta': 0,
+            'fgs_epsilons': epsilons,
             'test_accuracy': test_accuracy,
             'untargeted_accuracies': untargeted_accuracies,
             'untargeted_total_succesful_attacks_list': untargeted_total_succesful_attacks_list,
@@ -1009,6 +1018,7 @@ def train_and_eval_cdlvm(data_class, betas=[0.0001, 0.001, 0.01, 0.1, 1, 10, 100
         with open(save_path, 'wb') as f:
             pickle.dump(results_dict, f)
             print(f'Saved dict to {save_path}')
+        return
 
 
     for beta in betas:
@@ -1041,9 +1051,12 @@ def train_and_eval_cdlvm(data_class, betas=[0.0001, 0.001, 0.01, 0.1, 1, 10, 100
                 print(f'### Finished training, evaluating... ###')
                 test_accuracy = test_model(vib_classifier, logits_test_data_loader)
                 
+                pretrained_model = torch.load(pretrained_path)
+                pretrained_model.to(device)
                 hybrid_model = HybridModel(pretrained_model, vib_classifier, device, fc_name=fc_name)
                 hybrid_model.freeze_base()
                 hybrid_model.to(device)
+                # del(pretrained_model)
 
                 untargeted_accuracies, untargeted_examples, untargeted_total_succesful_attacks_list, targeted_accuracies, targeted_examples, targeted_total_succesful_attacks_list = attack_and_eval(hybrid_model, device, test_data_loader, target_label, epsilons)
 
@@ -1057,7 +1070,8 @@ def train_and_eval_cdlvm(data_class, betas=[0.0001, 0.001, 0.01, 0.1, 1, 10, 100
                 wandb_run.finish()
 
             results_dict[run_name] = {
-                'vib_classifier': vib_classifier,
+                'dict_name': pkl_name,
+                'vib_classifier': vib_classifier.to('cpu'),
                 'beta': beta,
                 'test_accuracy': test_accuracy,
                 'fgs_epsilons': epsilons,
@@ -1086,21 +1100,20 @@ def train_and_eval_cdlvm(data_class, betas=[0.0001, 0.001, 0.01, 0.1, 1, 10, 100
                 targeted acc at eps={epsilons[-1]}: {targeted_accuracies[-1]}\n\
                 ')
 
-# train_and_eval_cdlvm('cifar', kl_rate_loss=False, clip_grad=False, clip_loss=True, loss_type='ppo', num_minibatches=4)
+# train_and_eval_cdlvm('imagenet', kl_rate_loss=False, clip_grad=False, clip_loss=True, loss_type='ppo', num_minibatches=4)
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-class", type=str, default="mnist", help="Kind of dataset to use: mnist, cifar or imagenet")
     parser.add_argument("--betas", nargs='+', type=float, default=[0.0001, 0.001, 0.01, 0.1, 1, 10, 100, 1000], help="Betas to use for VIB or VUB")
     parser.add_argument("--epsilons", nargs='+', type=float, default=[0.1, 0.35, 0.4, 0.45, 0.5], help="Epsilons to use for FGSM")
-    parser.add_argument("--loss-type", type=str, default="vib", help="Which loss function to use: Either VIB, VUB or PPO")
+    parser.add_argument("--loss-type", type=str, default="vib", help="Which loss function to use: Either VIB, VUB or PPO or Vanilla")
     parser.add_argument("--kl-rate-loss", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True, help="Use KLD instead of entropy in first part of rate term in VUB")
     parser.add_argument("--clip-grad", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True, help="Clip gradient")
     parser.add_argument("--clip-loss", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True, help="Clip rate term in loss function")
     parser.add_argument("--seed", type=int, default=1, help="seed of the experiment")
     parser.add_argument("--num-minibatches", type=int, default=1, help="Number of minibatches")
     parser.add_argument("--num-runs", type=int, default=1, help="Number of runs per beta")
-    parser.add_argument("--eval-vanilla", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True, help="Evaluate the vanilla model")
     args = parser.parse_args()
     if args.loss_type == 'ppo' and (args.num_minibatches < 2):
         raise ValueError
@@ -1113,5 +1126,4 @@ if __name__ == "__main__":
     # torch.manual_seed(args.seed)
     train_and_eval_cdlvm(data_class=args.data_class, betas=args.betas, epsilons=args.epsilons,
                          loss_type=args.loss_type, kl_rate_loss=args.kl_rate_loss, clip_grad=args.clip_grad,
-                         clip_loss=args.clip_loss, num_minibatches=args.num_minibatches, num_runs=args.num_runs,
-                         eval_vanilla=args.eval_vanilla)
+                         clip_loss=args.clip_loss, num_minibatches=args.num_minibatches, num_runs=args.num_runs)

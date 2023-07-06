@@ -593,10 +593,15 @@ def loop_data(model, train_dataloader, test_dataloader, beta, writer, epochs,
                 elif loss_type == 'vub':
                     # minibatch_loss = rate_term + beta * distortion_term
                     if clip_loss:
-                        # minibatch_loss = torch.clamp(rate_term, min=torch.tensor(0).to(device), max=(beta * distortion_term).item()) + beta * distortion_term
-                        minibatch_loss = - torch.clamp(batch_h_z_x, min=torch.tensor(0).to(device), max=(classification_loss/2).item()) \
-                            - beta * torch.clamp(batch_h_z_y, min=torch.tensor(0).to(device), max=(classification_loss/2).item()) \
-                                + beta * classification_loss
+                        max_regularization_value = (abs(beta) * classification_loss).item()
+                        min_regularization_value = torch.tensor(0).to(device)
+                        # minibatch_loss = torch.clamp(rate_term, min=torch.tensor(0).to(device), max=(beta * distortion_term).item()) + beta * distortion_term  #  THIS WORKED MORE OR LESS LIKE REGULAR VIB (- H(Y|Z))
+                        # minibatch_loss = torch.clamp(rate_term, min=torch.tensor(0).to(device), max=(beta * distortion_term).item()) + classification_loss + beta * batch_h_z_y  #  DIDN'T TRY THIS YET
+                        minibatch_loss = torch.clamp(rate_term, min=min_regularization_value, max=(max_regularization_value)) + classification_loss - torch.clamp(beta * batch_h_z_y, min=min_regularization_value, max=max_regularization_value)
+                        # minibatch_loss = - torch.clamp(batch_h_z_x, min=torch.tensor(0).to(device), max=classification_loss) + classification_loss + beta * torch.clamp(batch_h_z_y, min=torch.tensor(0).to(device), max=(classification_loss).item())    THIS DIDNT WORK
+                        # minibatch_loss = - torch.clamp(batch_h_z_x, min=torch.tensor(0).to(device), max=(classification_loss/2).item()) \
+                        #     - beta * torch.clamp(batch_h_z_y, min=torch.tensor(0).to(device), max=(classification_loss/2).item()) \
+                        #         + beta * classification_loss
                     else:
                         # minibatch_loss = rate_term + beta * distortion_term
                         minibatch_loss = - batch_h_z_x + beta * (classification_loss - batch_h_z_y)
@@ -670,20 +675,33 @@ def loop_data(model, train_dataloader, test_dataloader, beta, writer, epochs,
             writer.add_scalar(
                 "charts/total_epoch_ratio", (epoch_ratio1 + epoch_ratio2 + epoch_ratio3 + epoch_ratio4) / len(train_dataloader), e)
 
-        # test loss
-        model.eval()
-        epoch_val_classification_loss = 0
-        for batch_num, (embeddings, labels) in enumerate(test_dataloader):
-            x = embeddings.to(device)
-            y = labels.to(device)
-            (mu, std), log_probs, logits = model(x)
-            epoch_val_classification_loss += nn.CrossEntropyLoss()(logits.squeeze(0), y) / len(test_dataloader)
-            # epoch_test_loss += vib_loss(logits, y, mu, std, beta).item()
-            # TODO: add this line
-            # epoch_test_loss += vib_loss(logits, y, mu, std, beta).item() / len(train_dataloader)
-        model.test_loss.append(epoch_val_classification_loss.item())
-        writer.add_scalar("charts/epoch_val_classification_loss", epoch_val_classification_loss, e)
-        model.train()
+        if (not ((e + 1) % 10)) or (e == 0):
+            # test loss
+            model.eval()
+            total_correct = 0
+            total_incorrect = 0
+            epoch_val_classification_loss = 0
+            with torch.no_grad():
+                for batch_num, (embeddings, labels) in enumerate(test_dataloader):
+                    x = embeddings.to(device)
+                    y = labels.to(device)
+                    (mu, std), log_probs, logits = model(x)
+                    logits = logits.squeeze(0)
+                    epoch_val_classification_loss += nn.CrossEntropyLoss()(logits, y) / len(test_dataloader)
+                    # epoch_test_loss += vib_loss(logits, y, mu, std, beta).item()
+                    # TODO: add this line
+                    # epoch_test_loss += vib_loss(logits, y, mu, std, beta).item() / len(train_dataloader)
+                    predictions = torch.argmax(torch.softmax(logits, dim=-1), dim=1)
+                    correct_classifications = sum(predictions == labels.to(device))
+                    incorrect_classifications = len(x) - correct_classifications
+                    total_correct += correct_classifications
+                    total_incorrect += incorrect_classifications
+                acc = (total_correct / (total_correct + total_incorrect)).item()
+
+            model.test_loss.append(epoch_val_classification_loss.item())
+            writer.add_scalar("charts/epoch_val_classification_loss", epoch_val_classification_loss, e)
+            writer.add_scalar("charts/epoch_val_accuracy", acc, e)
+            model.train()
 
 
 class HybridModel(nn.Module):
@@ -1042,7 +1060,7 @@ def train_and_eval_cdlvm(data_class, betas=[0.0001, 0.001, 0.01, 0.1, 1, 10, 100
                 avg l2 distance for succesful cw targeted attack: {avg_l2_dist_for_sx_targeted_attack}\n\
                 ')
 
-# train_and_eval_cdlvm('imagenet', kl_rate_loss=True, clip_grad=False, clip_loss=True, loss_type='vub', num_minibatches=4)
+# train_and_eval_cdlvm('imagenet', kl_rate_loss=False, clip_grad=False, clip_loss=True, loss_type='vub', num_minibatches=1, betas=[-0.1])
 # train_and_eval_cdlvm('cifar', kl_rate_loss=False, clip_grad=False, clip_loss=True, loss_type='vub')
 
 def parse_args():

@@ -1,3 +1,4 @@
+from datasets import load_from_disk, load_dataset
 from datetime import datetime
 import random
 from distutils.util import strtobool
@@ -10,7 +11,7 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from torchvision.datasets import MNIST
-
+import datasets
 import numpy as np
 import torch
 import math
@@ -22,6 +23,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import pandas as pd
+from transformers import AutoTokenizer
 from torch.autograd import Variable
 from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader
@@ -40,6 +42,7 @@ from tqdm import tqdm
 import gc
 import cw
 from torch.utils.data import Dataset
+from transformer_vib import TransformerVIB, TransformerHybridModel, tokenizer, encode, bae_attack
 import wandb
 import time
 from torch.utils.tensorboard import SummaryWriter
@@ -751,6 +754,8 @@ def get_dataloaders(data_class, logits=False):
     CIFAR_LOGITS_TEST_DATALOADER_PATH = '/D/datasets/CIFAR/logits_dataloaders/logits_test_dataloader.pkl'
     MNIST_LOGITS_TRAIN_DATALOADER_PATH = '/D/datasets/MNIST/logits_dataloaders/logits_train_dataloader.pkl'
     MNIST_LOGITS_TEST_DATALOADER_PATH = '/D/datasets/MNIST/logits_dataloaders/logits_test_dataloader.pkl'
+    YELP_LOGITS_TRAIN_DATALOADER_PATH = '/D/datasets/yelp/logits_dataloaders/logits_train_dataloader.pkl'
+    YELP_LOGITS_TEST_DATALOADER_PATH = '/D/datasets/yelp/logits_dataloaders/logits_test_dataloader.pkl'
 
     if data_class == 'mnist':
         if logits:
@@ -816,6 +821,25 @@ def get_dataloaders(data_class, logits=False):
             test_transform = train_transform
             train_kwargs = {'split': 'train'}
             test_kwargs = {'split': 'val'}
+
+    elif data_class == 'yelp':
+        if logits:
+            with open(YELP_LOGITS_TRAIN_DATALOADER_PATH, 'rb') as f:
+                train_data_loader = pickle5.load(f)
+            with open(YELP_LOGITS_TEST_DATALOADER_PATH, 'rb') as f:
+                val_data_loader = pickle5.load(f)
+            return train_data_loader, val_data_loader
+        else:
+            dataset = load_dataset('yelp_polarity')
+            dataset = dataset.map(encode, batched=True)
+            dataset.set_format(type='torch', columns=['input_ids', 'attention_mask', 'label'])
+
+            train_dataset = dataset['train']
+            test_dataset = dataset['test']
+
+            train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=8)
+            test_dataloader = DataLoader(test_dataset, shuffle=True, batch_size=8)
+            return train_dataloader, test_dataloader
     else:
         raise NotImplementedError
 
@@ -872,7 +896,7 @@ def train_and_eval_cdlvm(data_class, betas=[0.0001, 0.001, 0.01, 0.1, 1, 10, 100
                           kl_rate_loss=False, clip_grad=False, clip_loss=True,
                          num_minibatches=1, num_runs=1):
     """
-    DLVM == conditional deep latent variational model
+    CDLVM == conditional deep latent variational model
     """
     LR = 1e-4
     results_dict = {}
@@ -921,6 +945,14 @@ def train_and_eval_cdlvm(data_class, betas=[0.0001, 0.001, 0.01, 0.1, 1, 10, 100
         max_grad_norm = 5
         transformation_mean = (0.485, 0.456, 0.406)
         transformation_std = (0.229, 0.224, 0.225)
+    elif data_class == 'yelp':
+        fc_name = 'classifier'
+        epochs = 25
+        hidden_size = 768
+        output_size = 2
+        pretrained_path = '/D/models/pretrained/pretrained_bert_yelp.pkl'
+        target_label = 0  # Not relevant
+        max_grad_norm = 5
     else:
         raise NotImplementedError
     
@@ -996,7 +1028,10 @@ def train_and_eval_cdlvm(data_class, betas=[0.0001, 0.001, 0.01, 0.1, 1, 10, 100
 
             print(f"\n\n### Started training {run_name} ###")
 
-            vib_classifier = VIB(hidden_size, output_size, device).to(device)        
+            if data_class == 'yelp':
+                vib_classifier = TransformerVIB(hidden_size, output_size, device).to(device)        
+            else:
+                vib_classifier = VIB(hidden_size, output_size, device).to(device)        
 
             optimizer = optim.Adam(filter(lambda p: p.requires_grad, vib_classifier.parameters()), LR / num_minibatches, betas=(0.5, 0.999))
             scheduler = lr_scheduler.ExponentialLR(optimizer, gamma=0.97)
@@ -1008,17 +1043,25 @@ def train_and_eval_cdlvm(data_class, betas=[0.0001, 0.001, 0.01, 0.1, 1, 10, 100
                         clip_grad=clip_grad, clip_loss=clip_loss, max_grad_norm=max_grad_norm,
                           kl_rate_loss=kl_rate_loss)
                 print(f'### Finished training, evaluating... ###')
-                test_accuracy = test_model(vib_classifier, logits_test_data_loader)
                 
-                pretrained_model = torch.load(pretrained_path)
-                pretrained_model.to(device)
-                hybrid_model = HybridModel(pretrained_model, vib_classifier, device, fc_name=fc_name)
-                hybrid_model.freeze_base()
-                hybrid_model.to(device)
-                # del(pretrained_model)
-
-                untargeted_accuracies, untargeted_examples, untargeted_total_succesful_attacks_list, targeted_accuracies, targeted_examples, targeted_total_succesful_attacks_list, avg_l2_dist_for_sx_targeted_attack = attack_and_eval(
-                    hybrid_model, device, test_data_loader, target_label, epsilons, mean=transformation_mean, std=transformation_std)
+                if data_class == 'yelp':
+                    with open(pretrained_path, 'rb') as f:
+                        pretrained_model = pickle.load(f)
+                    pretrained_model.to(device)
+                    hybrid_model = TransformerHybridModel(pretrained_model, vib_classifier, device, fc_name=fc_name)
+                    hybrid_model.freeze_base()
+                    hybrid_model.to(device)
+                    untargeted_accuracies, untargeted_examples, untargeted_total_succesful_attacks_list, targeted_accuracies, targeted_examples, targeted_total_succesful_attacks_list, avg_l2_dist_for_sx_targeted_attack = (0,0,0,0,0,0,0)
+                    test_accuracy, untargeted_accuracies, avg_l2_dist_for_sx_targeted_attack = bae_attack(hybrid_model)  # This is not really l2 distnace but avg number of words perturbed
+                else:
+                    test_accuracy = test_model(vib_classifier, logits_test_data_loader)
+                    pretrained_model = torch.load(pretrained_path)
+                    pretrained_model.to(device)
+                    hybrid_model = HybridModel(pretrained_model, vib_classifier, device, fc_name=fc_name)
+                    hybrid_model.freeze_base()
+                    hybrid_model.to(device)
+                    untargeted_accuracies, untargeted_examples, untargeted_total_succesful_attacks_list, targeted_accuracies, targeted_examples, targeted_total_succesful_attacks_list, avg_l2_dist_for_sx_targeted_attack = attack_and_eval(
+                        hybrid_model, device, test_data_loader, target_label, epsilons, mean=transformation_mean, std=transformation_std)
 
             except ValueError as e:
                 raise e
@@ -1060,7 +1103,7 @@ def train_and_eval_cdlvm(data_class, betas=[0.0001, 0.001, 0.01, 0.1, 1, 10, 100
                 avg l2 distance for succesful cw targeted attack: {avg_l2_dist_for_sx_targeted_attack}\n\
                 ')
 
-# train_and_eval_cdlvm('imagenet', kl_rate_loss=False, clip_grad=False, clip_loss=True, loss_type='vub', num_minibatches=1, betas=[-0.1])
+# train_and_eval_cdlvm('yelp', kl_rate_loss=False, clip_grad=False, clip_loss=True, loss_type='vub', num_minibatches=1, betas=[0.01, 0.001, 0.1])
 # train_and_eval_cdlvm('cifar', kl_rate_loss=False, clip_grad=False, clip_loss=True, loss_type='vub')
 
 def parse_args():

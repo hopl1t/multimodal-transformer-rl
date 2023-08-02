@@ -25,6 +25,7 @@ from textattack.metrics.attack_metrics import (
     AttackSuccessRate,
     WordsPerturbed,
 )
+import os
 
 
 tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
@@ -161,15 +162,25 @@ def encode(examples):
     return tokenizer(examples['text'], truncation=True, padding='max_length', max_length=512)
 
 
-def bae_attack(hybrid_model):
+def bae_attack(hybrid_model, dataset_name):
     """
     Performs a BAE-R untargeted blackbox attack using the textattack API
     """
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # supress noisy tf logs
     tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
     model_adaptor = TransformerAdaptor(hybrid_model)
     model_wrapper = HuggingFaceModelWrapper(model_adaptor, tokenizer)
 
-    dataset = HuggingFaceDataset("yelp_polarity", None, "test")
+    if dataset_name == 'yelp':
+        dataset = HuggingFaceDataset("yelp_polarity", None, "test")
+    elif dataset_name == 'cola':
+        dataset = HuggingFaceDataset("glue", 'cola', "test")
+    elif dataset_name == 'mnli':
+        dataset = HuggingFaceDataset("glue", 'mnli', "validation_matched")
+    elif dataset_name in ('ag_news', 'imdb'):
+        dataset = HuggingFaceDataset(dataset_name, None, "test")
+    else:
+        raise NotImplementedError
 
     attack = BAEGarg2019.build(model_wrapper)
     attack_args = AttackArgs(
@@ -188,6 +199,7 @@ def bae_attack(hybrid_model):
     attack_query_stats = AttackQueries().calculate(attack_log_manager.results)
     acc_under_attack = str(attack_success_stats["attack_accuracy_perc"])
     avg_pertrubed_words_prct = str(words_perturbed_stats["avg_word_perturbed_perc"])
+    attack_success_rate = attack_success_stats['attack_success_rate']
     original_acc = attack_success_stats["original_accuracy"]
 
-    return original_acc, acc_under_attack, avg_pertrubed_words_prct
+    return original_acc, [acc_under_attack], avg_pertrubed_words_prct, attack_success_rate
